@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -8,12 +9,26 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
+)
+
+// Constants for WebSocket timeouts (Cloud Run Connection Heartbeats)
+const (
+	// Time allowed to write a message to the peer.
+	writeWait = 10 * time.Second
+
+	// Time allowed to read the next pong message from the peer.
+	pongWait = 60 * time.Second
+
+	// Send pings to peer with this period. Must be less than pongWait.
+	pingPeriod = (pongWait * 9) / 10
 )
 
 // RoomState defines the state of a room's canvas and visual layout
@@ -27,11 +42,25 @@ type RoomState struct {
 	AspectRatio string  `json:"aspectRatio"`  // e.g., "16:9", "16:10", "4:3", "1:1"
 }
 
-// Room represents a dynamic room with its state and connected web sockets
+// SafeConn wraps a WebSocket connection with a mutex to prevent concurrent write panics
+type SafeConn struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+// WriteMessage is a concurrent-safe wrapper around write calls
+func (sc *SafeConn) WriteMessage(messageType int, data []byte) error {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	sc.conn.SetWriteDeadline(time.Now().Add(writeWait))
+	return sc.conn.WriteMessage(messageType, data)
+}
+
+// Room represents a dynamic room with its state and safe client connections
 type Room struct {
 	ID      string
 	State   RoomState
-	Clients map[*websocket.Conn]string // conn -> role ("admin" or "client")
+	Clients map[*SafeConn]string // conn -> role ("admin" or "client")
 	mu      sync.Mutex
 }
 
@@ -53,7 +82,7 @@ type WSMessage struct {
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		// Allow all origins for easy development and network sharing on table screens
+		// Allow all origins for tabletop networks and remote displays
 		return true
 	},
 }
@@ -68,14 +97,14 @@ func (h *Hub) getOrCreateRoom(roomID string) *Room {
 			ID: roomID,
 			State: RoomState{
 				RoomID:      roomID,
-				ImgURL:      "", // empty initially
+				ImgURL:      "",
 				X:           0.0,
 				Y:           0.0,
 				Scale:       1.0,
-				Layout:      "1", // default layout
+				Layout:      "1",
 				AspectRatio: "16:9",
 			},
-			Clients: make(map[*websocket.Conn]string),
+			Clients: make(map[*SafeConn]string),
 		}
 		h.rooms[roomID] = room
 		log.Printf("Created new room: %s", roomID)
@@ -83,20 +112,20 @@ func (h *Hub) getOrCreateRoom(roomID string) *Room {
 	return room
 }
 
-func (h *Hub) removeConnection(roomID string, conn *websocket.Conn) {
+func (h *Hub) removeConnection(roomID string, sc *SafeConn) {
 	h.mu.RLock()
 	room, exists := h.rooms[roomID]
 	h.mu.RUnlock()
 
 	if exists {
 		room.mu.Lock()
-		delete(room.Clients, conn)
+		delete(room.Clients, sc)
 		clientCount := len(room.Clients)
 		room.mu.Unlock()
 
 		log.Printf("Disconnected client from room %s. Active clients: %d", roomID, clientCount)
 
-		// Optionally clean up empty rooms after some delay or instantly
+		// Optionally clean up empty rooms
 		if clientCount == 0 {
 			h.mu.Lock()
 			delete(h.rooms, roomID)
@@ -124,16 +153,27 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Upgrade error: %v", err)
 		return
 	}
+	
+	// Create safe wrapped connection
+	safeConn := &SafeConn{conn: conn}
 	defer conn.Close()
 
 	room := hub.getOrCreateRoom(roomID)
 
 	room.mu.Lock()
-	room.Clients[conn] = role
+	room.Clients[safeConn] = role
 	currentState := room.State
 	room.mu.Unlock()
 
 	log.Printf("Connected %s to room %s. Total connections in room: %d", role, roomID, len(room.Clients))
+
+	// Configure WebSocket Heartbeat limits on raw conn (Cloud Run Compliance)
+	conn.SetReadLimit(10 << 20) // 10MB limit
+	conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
 
 	// Send initial state to the newly connected client
 	initMsg := WSMessage{
@@ -142,8 +182,25 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	initBytes, err := json.Marshal(initMsg)
 	if err == nil {
-		_ = conn.WriteMessage(websocket.TextMessage, initBytes)
+		_ = safeConn.WriteMessage(websocket.TextMessage, initBytes)
 	}
+
+	// Start ping ticker goroutine for this specific connection
+	done := make(chan struct{})
+	go func(sc *SafeConn, ch chan struct{}) {
+		ticker := time.NewTicker(pingPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := sc.WriteMessage(websocket.PingMessage, nil); err != nil {
+					return
+				}
+			case <-ch:
+				return
+			}
+		}
+	}(safeConn, done)
 
 	// Read loop
 	for {
@@ -163,9 +220,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		switch msg.Type {
 		case "state_update":
-			// Only process state updates if sender is admin
-			// However, in local dev / cooperative environments, we can allow clients if desired.
-			// Let's enforce that if we are strict, or just accept updates to keep it robust.
 			room.mu.Lock()
 			room.State = msg.Payload
 			room.State.RoomID = roomID // ensure room ID is correct
@@ -184,31 +238,28 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			room.mu.Lock()
 			for clientConn := range room.Clients {
-				// Don't echo back to the same connection that sent it to save bandwidth,
-				// but let's broadcast to all other connections.
-				if clientConn == conn {
+				// Don't echo back to the same connection that sent it to save bandwidth
+				if clientConn == safeConn {
 					continue
 				}
-				go func(c *websocket.Conn, b []byte) {
-					// We might need a mutex wrapper per-connection if multiple concurrent writes happen,
-					// but Go's HTTP routing & websocket reading are generally separate.
-					// Let's protect writes or let them write sequentially.
-					_ = c.WriteMessage(websocket.TextMessage, b)
+				go func(sc *SafeConn, b []byte) {
+					_ = sc.WriteMessage(websocket.TextMessage, b)
 				}(clientConn, broadcastBytes)
 			}
 			room.mu.Unlock()
 
 		case "ping":
-			_ = conn.WriteJSON(WSMessage{Type: "pong"})
+			_ = safeConn.WriteMessage(websocket.TextMessage, []byte(`{"type":"pong"}`))
 		}
 	}
 
-	hub.removeConnection(roomID, conn)
+	// Cleanup connection
+	close(done)
+	hub.removeConnection(roomID, safeConn)
 }
 
 // Handle file uploads
 func handleUpload(w http.ResponseWriter, r *http.Request) {
-	// Enable CORS
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
@@ -223,7 +274,6 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Max 20MB files
 	r.ParseMultipartForm(20 << 20)
 
 	file, handler, err := r.FormFile("image")
@@ -233,14 +283,12 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Ensure uploads directory exists
 	uploadDir := "./uploads"
 	if err := os.MkdirAll(uploadDir, os.ModePerm); err != nil {
 		http.Error(w, "Failed to create uploads directory", http.StatusInternalServerError)
 		return
 	}
 
-	// Create unique file name using timestamp
 	ext := filepath.Ext(handler.Filename)
 	filename := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
 	filePath := filepath.Join(uploadDir, filename)
@@ -257,7 +305,6 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return JSON with the relative file URL
 	resp := map[string]string{
 		"url": fmt.Sprintf("/uploads/%s", filename),
 	}
@@ -308,13 +355,10 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Prepend static path
 	path = filepath.Join(h.staticPath, path)
 
-	// Check if file exists
 	fi, err := os.Stat(path)
 	if os.IsNotExist(err) || fi.IsDir() {
-		// Serve index.html instead for SPA router
 		http.ServeFile(w, r, filepath.Join(h.staticPath, h.indexPath))
 		return
 	} else if err != nil {
@@ -322,7 +366,6 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// File exists, serve static content
 	http.FileServer(http.Dir(h.staticPath)).ServeHTTP(w, r)
 }
 
@@ -337,27 +380,19 @@ func main() {
 	port := flag.Int("port", portVal, "Port to run the backend server on")
 	flag.Parse()
 
-	// Ensure uploads directory exists
 	if err := os.MkdirAll("./uploads", os.ModePerm); err != nil {
 		log.Fatalf("Failed to create uploads directory: %v", err)
 	}
 
 	mux := http.NewServeMux()
 
-	// WebSocket handler
 	mux.HandleFunc("/ws", handleWebSocket)
-
-	// API Handlers
 	mux.HandleFunc("/api/upload", handleUpload)
 	mux.HandleFunc("/api/rooms", handleRoomsList)
 
-	// Serve Uploaded Files
 	fs := http.FileServer(http.Dir("./uploads"))
 	mux.Handle("/uploads/", http.StripPrefix("/uploads/", fs))
 
-	// SPA Static Frontend Files
-	// If front-end is compiled into `./dist`, serve it.
-	// Check if ./dist exists, otherwise use a placeholder warning or serve what we can.
 	distPath := "./dist"
 	if _, err := os.Stat(distPath); os.IsNotExist(err) {
 		log.Printf("Warning: ./dist directory not found. Please build frontend with 'npm run build'")
@@ -366,9 +401,8 @@ func main() {
 	spa := spaHandler{staticPath: distPath, indexPath: "index.html"}
 	mux.Handle("/", spa)
 
-	// Add CORS for API endpoints
+	// Permissive CORS Handler
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Very permissive CORS for local tabletop development and remote debugging
 		if origin := r.Header.Get("Origin"); origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
@@ -381,8 +415,45 @@ func main() {
 	})
 
 	serverAddr := fmt.Sprintf("0.0.0.0:%d", *port)
-	log.Printf("Starting TopView server on http://%s", serverAddr)
-	if err := http.ListenAndServe(serverAddr, handler); err != nil {
-		log.Fatalf("Server failed to start: %v", err)
+	server := &http.Server{
+		Addr:    serverAddr,
+		Handler: handler,
+	}
+
+	// Capture interrupt signals for standard Cloud Run Graceful SIGTERM Shutdown
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("Starting TopView server on http://%s", serverAddr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed to start: %v", err)
+		}
+	}()
+
+	// Wait for SIGINT or SIGTERM (Cloud Run scale-down signal)
+	sig := <-stop
+	log.Printf("Received shutdown signal: %v. Initiating graceful websocket close...", sig)
+
+	// Cleanly disconnect all active presentation screens
+	hub.mu.Lock()
+	for _, room := range hub.rooms {
+		room.mu.Lock()
+		for client := range room.Clients {
+			_ = client.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, "Server shutting down gracefully"))
+			client.conn.Close()
+		}
+		room.mu.Unlock()
+	}
+	hub.mu.Unlock()
+
+	// Shutdown the HTTP server under 15-second context
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("Server graceful shutdown error: %v", err)
+	} else {
+		log.Println("Server gracefully exited.")
 	}
 }

@@ -45,7 +45,7 @@ export const Admin: React.FC = () => {
   const [x, setX] = useState(0);
   const [y, setY] = useState(0);
   const [scale, setScale] = useState(1);
-  const [layout, setLayout] = useState("1"); // "1", "2-tb", "2-lr", "4"
+  const [layout, setLayout] = useState("1"); // "1", "2-tb", "2-lr", "3-trb", "3-tlb", "4"
   const [copied, setCopied] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -58,7 +58,6 @@ export const Admin: React.FC = () => {
   const sendStateUpdate = (newState: Partial<RoomState>) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-    // Build the complete room state payload
     const payload: RoomState = {
       roomId: roomId || "",
       imgUrl: newState.imgUrl !== undefined ? newState.imgUrl : imgUrl,
@@ -115,10 +114,8 @@ export const Admin: React.FC = () => {
     ws.onclose = () => {
       setWsConnected(false);
       log("WebSocket disconnected, trying to reconnect...");
-      // Reconnect loop
       setTimeout(() => {
         if (wsRef.current === ws) {
-          // Trigger effect reload
           setImgUrl((prev) => prev);
         }
       }, 3000);
@@ -133,12 +130,10 @@ export const Admin: React.FC = () => {
     };
   }, [roomId]);
 
-  // Debug logger
   const log = (msg: string, details?: any) => {
     console.log(`[Admin:${roomId}] ${msg}`, details || "");
   };
 
-  // Handle local state change from Canvas
   const handleCanvasChange = (state: { x: number; y: number; scale: number }) => {
     setX(state.x);
     setY(state.y);
@@ -153,7 +148,6 @@ export const Admin: React.FC = () => {
 
   const handleImageSelect = (url: string) => {
     setImgUrl(url);
-    // Reset canvas position when changing image
     setX(0);
     setY(0);
     setScale(1);
@@ -223,6 +217,10 @@ export const Admin: React.FC = () => {
         return "2 Copies (Top & Bottom)";
       case "2-lr":
         return "2 Copies (Left & Right)";
+      case "3-trb":
+        return "3 Copies (Top, Right, Bottom)";
+      case "3-tlb":
+        return "3 Copies (Top, Left, Bottom)";
       case "4":
         return "4 Copies (All Sides)";
       default:
@@ -245,7 +243,8 @@ export const Admin: React.FC = () => {
     }
   };
 
-  // Computes exact physical dimensions for a sidebar preview viewport
+  // Computes exact physical dimensions for a sidebar preview viewport.
+  // Mimics RoomClient's wrapper-based layouts with 100% precision.
   const getPreviewStyles = (layoutType: string, rotateDeg: number, isChild = false) => {
     const containerSize = 184; // width and height of sidebar aspect-square content slot
     const gap = 4;
@@ -256,7 +255,6 @@ export const Admin: React.FC = () => {
     let viewH = 0;
     let sideW = 0;
     let sideH = 0;
-    let isSwapped = rotateDeg === 90 || rotateDeg === 270;
 
     if (layoutType === "1") {
       const { width, height } = fitAspectRatio(containerSize, containerSize, aspectRatio);
@@ -280,10 +278,8 @@ export const Admin: React.FC = () => {
         wVis = slotW;
         hVis = slotW / invAspect;
       }
-      
       viewW = hVis; // physical width
       viewH = wVis; // physical height
-      isSwapped = false; // already mapped physically
     } else if (layoutType === "3-trb" || layoutType === "3-tlb") {
       const hWidthLimit = (containerSize - gap) / (1 + aspect);
       const hHeightLimit = (containerSize - gap) / 2;
@@ -302,81 +298,8 @@ export const Admin: React.FC = () => {
       sideH = h;
     }
 
-    if (layoutType === "2-lr") {
-      if (isChild) {
-        return { width: `${viewW}px`, height: `${viewH}px` };
-      }
-      return { width: `${viewH}px`, height: `${viewW}px` };
-    }
+    const isSwapped = rotateDeg === 90 || rotateDeg === 270;
     
-    if (isSwapped) {
-      if (isChild) {
-        return { width: `${sideW}px`, height: `${sideH}px` };
-      }
-      return { width: `${sideH}px`, height: `${sideW}px` };
-    } else {
-      return { width: `${viewW}px`, height: `${viewH}px` };
-    }
-  };
-
-  // Computes exact physical dimensions for the floating bottom-left client minimap viewports
-  const getMinimapStyles = (layoutType: string, rotateDeg: number, isChild = false) => {
-    const widthContainer = 176; // fixed width of minimap container
-    const gap = 2;
-    const [rw, rh] = (aspectRatio || "16:9").split(":").map(Number);
-    const aspect = (rw && rh) ? rw / rh : 16 / 9;
-    const heightContainer = widthContainer / aspect;
-
-    let viewW = 0;
-    let viewH = 0;
-    let sideW = 0;
-    let sideH = 0;
-    let isSwapped = rotateDeg === 90 || rotateDeg === 270;
-
-    if (layoutType === "1") {
-      const { width, height } = fitAspectRatio(widthContainer, heightContainer, aspectRatio);
-      viewW = width;
-      viewH = height;
-    } else if (layoutType === "2-tb") {
-      const { width, height } = fitAspectRatio(widthContainer, (heightContainer - gap) / 2, aspectRatio);
-      viewW = width;
-      viewH = height;
-    } else if (layoutType === "2-lr") {
-      const slotW = (widthContainer - gap) / 2;
-      const slotH = heightContainer;
-      const invAspect = 1 / aspect;
-      
-      let wVis = 0;
-      let hVis = 0;
-      if (slotW / slotH > invAspect) {
-        hVis = slotH;
-        wVis = slotH * invAspect;
-      } else {
-        wVis = slotW;
-        hVis = slotW / invAspect;
-      }
-      
-      viewW = hVis; // physical width
-      viewH = wVis; // physical height
-      isSwapped = false; // already mapped physically
-    } else if (layoutType === "3-trb" || layoutType === "3-tlb") {
-      const hWidthLimit = (widthContainer - gap) / (1 + aspect);
-      const hHeightLimit = (heightContainer - gap) / 2;
-      const h = Math.min(hWidthLimit, hHeightLimit);
-      viewH = h;
-      viewW = h * aspect;
-      sideW = 2 * h + gap;
-      sideH = h;
-    } else if (layoutType === "4") {
-      const hWidthLimit = (widthContainer - 2 * gap) / (2 + aspect);
-      const hHeightLimit = (heightContainer - gap) / 2;
-      const h = Math.min(hWidthLimit, hHeightLimit);
-      viewH = h;
-      viewW = h * aspect;
-      sideW = 2 * h + gap;
-      sideH = h;
-    }
-
     if (layoutType === "2-lr") {
       if (isChild) {
         return { width: `${viewW}px`, height: `${viewH}px` };
@@ -834,119 +757,6 @@ export const Admin: React.FC = () => {
               scale={scale}
               onChange={handleCanvasChange}
             />
-
-            {/* Floating Live Client Minimap in the bottom-left corner */}
-            <div className="absolute bottom-4 left-4 z-30 bg-[#12131b]/80 backdrop-blur-md border border-gray-800 p-2.5 rounded-xl shadow-2xl w-44 md:w-52 pointer-events-none select-none transition-all">
-              <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-gray-800/60">
-                <span className="text-[9px] font-mono font-bold tracking-wider text-purple-400 uppercase">
-                  Client View Minimap
-                </span>
-                <span className="text-[8px] font-mono text-gray-500 font-semibold bg-gray-950 px-1 py-0.2 rounded">
-                  {aspectRatio}
-                </span>
-              </div>
-              
-              {/* Aspect Ratio Box Wrapper */}
-              <div 
-                className="w-full bg-gray-950 rounded-lg border border-gray-900/80 overflow-hidden relative p-1 flex items-center justify-center"
-                style={{
-                  aspectRatio: (aspectRatio || "16:9").replace(":", "/"),
-                }}
-              >
-                <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent pointer-events-none" />
-
-                {layout === "1" && (
-                  <div style={getMinimapStyles("1", 0)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden m-auto">
-                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                  </div>
-                )}
-
-                {layout === "2-tb" && (
-                  <div className="w-full h-full flex flex-col gap-0.5 items-center justify-center">
-                    <div style={getMinimapStyles("2-tb", 180)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform rotate-180 m-auto">
-                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                    </div>
-                    <div style={getMinimapStyles("2-tb", 0)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden m-auto">
-                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                    </div>
-                  </div>
-                )}
-
-                {layout === "2-lr" && (
-                  <div className="w-full h-full flex gap-0.5 items-center justify-center">
-                    <div style={getMinimapStyles("2-lr", 90)} className="flex items-center justify-center relative m-auto">
-                      <div style={getMinimapStyles("2-lr", 90, true)} className="absolute rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform rotate(90deg)">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
-                    </div>
-                    <div style={getMinimapStyles("2-lr", 270)} className="flex items-center justify-center relative m-auto">
-                      <div style={getMinimapStyles("2-lr", 270, true)} className="absolute rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform rotate(-90deg)">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {layout === "3-trb" && (
-                  <div className="w-full h-full flex gap-0.5 items-center justify-center">
-                    <div className="flex flex-col gap-0.5 items-center justify-center">
-                      <div style={getMinimapStyles("3-trb", 180)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden m-auto">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
-                      <div style={getMinimapStyles("3-trb", 0)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden m-auto">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
-                    </div>
-                    <div style={getMinimapStyles("3-trb", 270)} className="flex items-center justify-center relative m-auto">
-                      <div style={getMinimapStyles("3-trb", 270, true)} className="absolute rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform rotate(-90deg)">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {layout === "3-tlb" && (
-                  <div className="w-full h-full flex gap-0.5 items-center justify-center">
-                    <div style={getMinimapStyles("3-tlb", 90)} className="flex items-center justify-center relative m-auto">
-                      <div style={getMinimapStyles("3-tlb", 90, true)} className="absolute rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform rotate(90deg)">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-0.5 items-center justify-center">
-                      <div style={getMinimapStyles("3-tlb", 180)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden m-auto">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
-                      <div style={getMinimapStyles("3-tlb", 0)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden m-auto">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {layout === "4" && (
-                  <div className="w-full h-full flex gap-0.5 items-center justify-center">
-                    <div style={getMinimapStyles("4", 90)} className="flex items-center justify-center relative m-auto">
-                      <div style={getMinimapStyles("4", 90, true)} className="absolute rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform rotate(90deg)">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-0.5 items-center justify-center">
-                      <div style={getMinimapStyles("4", 180)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden m-auto">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
-                      <div style={getMinimapStyles("4", 0)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden m-auto">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
-                    </div>
-                    <div style={getMinimapStyles("4", 270)} className="flex items-center justify-center relative m-auto">
-                      <div style={getMinimapStyles("4", 270, true)} className="absolute rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform rotate(-90deg)">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
         </main>
       </div>
