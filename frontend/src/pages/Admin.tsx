@@ -1,0 +1,580 @@
+import React, { useState, useEffect, useRef } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { InteractiveCanvas } from "../components/InteractiveCanvas";
+import {
+  ArrowLeft,
+  Upload,
+  Copy,
+  Check,
+  Layout,
+  Maximize2,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+} from "lucide-react";
+
+interface RoomState {
+  roomId: string;
+  imgUrl: string;
+  x: number;
+  y: number;
+  scale: number;
+  layout: string;
+}
+
+const PRESET_IMAGES = [
+  {
+    name: "Coordinate Grid",
+    url: "https://images.unsplash.com/photo-1544383835-bda2bc66a55d?q=80&w=600&auto=format&fit=crop",
+  },
+  {
+    name: "Boardroom Plan",
+    url: "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?q=80&w=600&auto=format&fit=crop",
+  },
+  {
+    name: "Interactive Diagram",
+    url: "https://images.unsplash.com/photo-1531403009284-440f080d1e12?q=80&w=600&auto=format&fit=crop",
+  },
+];
+
+export const Admin: React.FC = () => {
+  const { roomId } = useParams<{ roomId: string }>();
+  const navigate = useNavigate();
+  const [imgUrl, setImgUrl] = useState("");
+  const [x, setX] = useState(0);
+  const [y, setY] = useState(0);
+  const [scale, setScale] = useState(1);
+  const [layout, setLayout] = useState("1"); // "1", "2-tb", "2-lr", "4"
+  const [copied, setCopied] = useState(false);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [imageUrlInput, setImageUrlInput] = useState("");
+
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // Sync state over WebSocket whenever it changes
+  const sendStateUpdate = (newState: Partial<RoomState>) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+    // Build the complete room state payload
+    const payload: RoomState = {
+      roomId: roomId || "",
+      imgUrl: newState.imgUrl !== undefined ? newState.imgUrl : imgUrl,
+      x: newState.x !== undefined ? newState.x : x,
+      y: newState.y !== undefined ? newState.y : y,
+      scale: newState.scale !== undefined ? newState.scale : scale,
+      layout: newState.layout !== undefined ? newState.layout : layout,
+    };
+
+    wsRef.current.send(
+      JSON.stringify({
+        type: "state_update",
+        payload,
+      })
+    );
+  };
+
+  // Set up WebSocket connection
+  useEffect(() => {
+    if (!roomId) return;
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const host = window.location.host;
+    const wsUrl = `${protocol}//${host}/ws?roomId=${roomId}&role=admin`;
+
+    log("Connecting WebSocket to " + wsUrl);
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setWsConnected(true);
+      log("WebSocket connected");
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "init") {
+          log("WebSocket init state received", msg.payload);
+          const p = msg.payload;
+          setImgUrl(p.imgUrl || "");
+          setX(p.x || 0);
+          setY(p.y || 0);
+          setScale(p.scale || 1);
+          setLayout(p.layout || "1");
+        }
+      } catch (err) {
+        console.error("Error parsing WS message:", err);
+      }
+    };
+
+    ws.onclose = () => {
+      setWsConnected(false);
+      log("WebSocket disconnected, trying to reconnect...");
+      // Reconnect loop
+      setTimeout(() => {
+        if (wsRef.current === ws) {
+          // Trigger effect reload
+          setImgUrl((prev) => prev);
+        }
+      }, 3000);
+    };
+
+    ws.onerror = (err) => {
+      console.error("WebSocket error:", err);
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [roomId]);
+
+  // Debug logger
+  const log = (msg: string, details?: any) => {
+    console.log(`[Admin:${roomId}] ${msg}`, details || "");
+  };
+
+  // Handle local state change from Canvas
+  const handleCanvasChange = (state: { x: number; y: number; scale: number }) => {
+    setX(state.x);
+    setY(state.y);
+    setScale(state.scale);
+    sendStateUpdate({ x: state.x, y: state.y, scale: state.scale });
+  };
+
+  const handleLayoutChange = (newLayout: string) => {
+    setLayout(newLayout);
+    sendStateUpdate({ layout: newLayout });
+  };
+
+  const handleImageSelect = (url: string) => {
+    setImgUrl(url);
+    // Reset canvas position when changing image
+    setX(0);
+    setY(0);
+    setScale(1);
+    sendStateUpdate({ imgUrl: url, x: 0, y: 0, scale: 1 });
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+    const formData = new FormData();
+    formData.append("image", file);
+
+    setIsUploading(true);
+    try {
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        handleImageSelect(data.url);
+      } else {
+        alert("Failed to upload image. Please try again.");
+      }
+    } catch (err) {
+      console.error("Upload error:", err);
+      alert("Error uploading file.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleUrlInputSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!imageUrlInput.trim()) return;
+    handleImageSelect(imageUrlInput.trim());
+    setImageUrlInput("");
+  };
+
+  const handleResetCanvas = () => {
+    setX(0);
+    setY(0);
+    setScale(1);
+    sendStateUpdate({ x: 0, y: 0, scale: 1 });
+  };
+
+  const handleZoom = (factor: number) => {
+    const newScale = Math.max(0.1, Math.min(15, scale + factor * scale));
+    setScale(newScale);
+    sendStateUpdate({ scale: newScale });
+  };
+
+  const copyClientLink = () => {
+    const clientUrl = `${window.location.protocol}//${window.location.host}/room/${roomId}`;
+    navigator.clipboard.writeText(clientUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const getLayoutLabel = (l: string) => {
+    switch (l) {
+      case "1":
+        return "1 Copy (Center)";
+      case "2-tb":
+        return "2 Copies (Top & Bottom)";
+      case "2-lr":
+        return "2 Copies (Left & Right)";
+      case "4":
+        return "4 Copies (All Sides)";
+      default:
+        return "Standard";
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#0d0e12] text-gray-200 flex flex-col">
+      {/* Navbar */}
+      <header className="bg-[#12131a] border-b border-gray-900 px-4 py-3 md:px-8 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => navigate("/")}
+            className="p-2 text-gray-400 hover:text-white hover:bg-gray-800/50 rounded-xl transition-all"
+            title="Go back to Home"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="h-5 w-px bg-gray-800" />
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm font-bold text-white font-mono uppercase tracking-wide">
+                Room: {roomId}
+              </h1>
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  wsConnected ? "bg-green-500 animate-pulse" : "bg-red-500"
+                }`}
+                title={wsConnected ? "WebSocket Connected" : "WebSocket Disconnected"}
+              />
+            </div>
+            <p className="text-[10px] text-gray-500 font-mono">ADMIN CONTROL PANEL</p>
+          </div>
+        </div>
+
+        {/* Link Share */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500 font-mono hidden sm:block">
+            Viewer Link:
+          </span>
+          <button
+            onClick={copyClientLink}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600/10 hover:bg-purple-600/25 border border-purple-500/30 text-purple-400 font-mono text-xs rounded-xl transition-all"
+          >
+            {copied ? (
+              <>
+                <Check className="w-3.5 h-3.5" /> Copied!
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5" /> Share Room URL
+              </>
+            )}
+          </button>
+        </div>
+      </header>
+
+      {/* Main Workspace Grid */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
+        {/* Left Control Column */}
+        <aside className="lg:col-span-4 bg-[#111219] border-r border-gray-900/80 p-5 space-y-6 overflow-y-auto max-h-screen">
+          {/* Content Upload */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold font-mono text-gray-500 tracking-wider uppercase">
+              1. Choose Content
+            </h3>
+
+            {/* Local file upload */}
+            <label className="flex flex-col items-center justify-center p-4 border border-dashed border-gray-800 rounded-xl hover:border-purple-500/50 hover:bg-purple-500/5 transition-all cursor-pointer group text-center">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                disabled={isUploading}
+                className="hidden"
+              />
+              <Upload className="w-6 h-6 text-gray-500 group-hover:text-purple-400 mb-2 transition-colors" />
+              <span className="text-xs font-medium text-gray-300">
+                {isUploading ? "Uploading file..." : "Upload local image"}
+              </span>
+              <span className="text-[10px] text-gray-500 font-mono mt-1">
+                PNG, JPG, WebP up to 20MB
+              </span>
+            </label>
+
+            {/* Paste URL */}
+            <form onSubmit={handleUrlInputSubmit} className="flex gap-1.5 pt-1">
+              <input
+                type="url"
+                placeholder="Paste remote image URL..."
+                value={imageUrlInput}
+                onChange={(e) => setImageUrlInput(e.target.value)}
+                className="flex-1 px-3 py-1.5 bg-gray-950 border border-gray-800 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-500 text-gray-300"
+              />
+              <button
+                type="submit"
+                className="px-2.5 py-1.5 bg-gray-900 border border-gray-800 hover:border-purple-500/50 hover:text-white rounded-lg text-xs transition-all font-semibold"
+              >
+                Load
+              </button>
+            </form>
+
+            {/* Preset Images */}
+            <div className="space-y-1.5 pt-1">
+              <span className="text-[10px] text-gray-500 font-mono">OR TRY SAMPLE PRESETS</span>
+              <div className="grid grid-cols-3 gap-1.5">
+                {PRESET_IMAGES.map((img) => (
+                  <button
+                    key={img.name}
+                    onClick={() => handleImageSelect(img.url)}
+                    className={`p-1 border rounded-lg overflow-hidden h-14 relative group ${
+                      imgUrl === img.url
+                        ? "border-purple-500 bg-purple-500/10"
+                        : "border-gray-800 bg-gray-950 hover:border-gray-700"
+                    }`}
+                  >
+                    <img
+                      src={img.url}
+                      alt={img.name}
+                      className="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity"
+                    />
+                    <div className="absolute inset-x-0 bottom-0 bg-black/80 py-0.5 text-[8px] text-center text-gray-300 truncate">
+                      {img.name}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Layout Orientation */}
+          <div className="space-y-3 pt-3 border-t border-gray-950">
+            <h3 className="text-xs font-bold font-mono text-gray-500 tracking-wider uppercase flex items-center gap-1.5">
+              <Layout className="w-4 h-4 text-purple-400" /> 2. Viewer Layout
+            </h3>
+            <p className="text-[11px] text-gray-500">
+              Configure how many copies are shown on the table client and their rotations so everyone can view it right side up.
+            </p>
+
+            <div className="grid grid-cols-2 gap-2">
+              {/* Preset 1: Single Center */}
+              <button
+                onClick={() => handleLayoutChange("1")}
+                className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
+                  layout === "1"
+                    ? "border-purple-500 bg-purple-500/10 text-white"
+                    : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 flex items-center justify-center relative">
+                  <span className="w-4 h-4 rounded bg-purple-500 flex items-center justify-center text-[8px] text-white">0°</span>
+                </div>
+                <div className="font-semibold text-xs">1 Copy</div>
+                <div className="text-[9px] text-gray-500">Single center</div>
+              </button>
+
+              {/* Preset 2: Top/Bottom */}
+              <button
+                onClick={() => handleLayoutChange("2-tb")}
+                className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
+                  layout === "2-tb"
+                    ? "border-purple-500 bg-purple-500/10 text-white"
+                    : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 flex flex-col justify-between items-center p-1">
+                  <span className="w-4 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[7px] text-white rotate-180">0°</span>
+                  <span className="w-4 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[7px] text-white">0°</span>
+                </div>
+                <div className="font-semibold text-xs">2 Copies (T-B)</div>
+                <div className="text-[9px] text-gray-500">Sitting opposite</div>
+              </button>
+
+              {/* Preset 3: Left/Right */}
+              <button
+                onClick={() => handleLayoutChange("2-lr")}
+                className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
+                  layout === "2-lr"
+                    ? "border-purple-500 bg-purple-500/10 text-white"
+                    : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 flex justify-between items-center p-1">
+                  <span className="w-3.5 h-4 rounded bg-purple-500 flex items-center justify-center text-[7px] text-white rotate-90">0°</span>
+                  <span className="w-3.5 h-4 rounded bg-purple-500 flex items-center justify-center text-[7px] text-white -rotate-90">0°</span>
+                </div>
+                <div className="font-semibold text-xs">2 Copies (L-R)</div>
+                <div className="text-[9px] text-gray-500">Sitting sides</div>
+              </button>
+
+              {/* Preset 4: Four Sided */}
+              <button
+                onClick={() => handleLayoutChange("4")}
+                className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
+                  layout === "4"
+                    ? "border-purple-500 bg-purple-500/10 text-white"
+                    : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 grid grid-cols-2 gap-1 p-1">
+                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white rotate-180 m-auto">N</span>
+                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white -rotate-90 m-auto">E</span>
+                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white rotate-90 m-auto">W</span>
+                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white m-auto">S</span>
+                </div>
+                <div className="font-semibold text-xs">4 Copies</div>
+                <div className="text-[9px] text-gray-500">Full table round</div>
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Controls */}
+          <div className="space-y-3 pt-3 border-t border-gray-950">
+            <h3 className="text-xs font-bold font-mono text-gray-500 tracking-wider uppercase">
+              3. Viewport Controls
+            </h3>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleZoom(0.25)}
+                disabled={!imgUrl}
+                className="flex-1 py-2 bg-gray-950 hover:bg-gray-900 disabled:opacity-40 border border-gray-800 rounded-xl text-xs font-medium flex items-center justify-center gap-1"
+              >
+                <ZoomIn className="w-4 h-4" /> Zoom In
+              </button>
+              <button
+                onClick={() => handleZoom(-0.2) }
+                disabled={!imgUrl}
+                className="flex-1 py-2 bg-gray-950 hover:bg-gray-900 disabled:opacity-40 border border-gray-800 rounded-xl text-xs font-medium flex items-center justify-center gap-1"
+              >
+                <ZoomOut className="w-4 h-4" /> Zoom Out
+              </button>
+              <button
+                onClick={handleResetCanvas}
+                disabled={!imgUrl}
+                className="flex-1 py-2 bg-purple-900/20 hover:bg-purple-900/40 border border-purple-500/20 disabled:opacity-40 rounded-xl text-xs text-purple-400 font-semibold flex items-center justify-center gap-1"
+              >
+                <RotateCcw className="w-4 h-4" /> Reset
+              </button>
+            </div>
+          </div>
+
+          {/* Mini Live Preview Block */}
+          <div className="space-y-3 pt-3 border-t border-gray-950">
+            <div className="flex justify-between items-center">
+              <h3 className="text-xs font-bold font-mono text-gray-500 tracking-wider uppercase">
+                Layout Preview
+              </h3>
+              <span className="text-[9px] font-mono bg-purple-900/40 text-purple-400 border border-purple-800/30 px-1.5 py-0.5 rounded">
+                {getLayoutLabel(layout)}
+              </span>
+            </div>
+
+            <div className="aspect-square w-full max-w-[200px] mx-auto bg-gray-950 rounded-xl border border-gray-900 overflow-hidden relative flex p-2">
+              <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent pointer-events-none" />
+
+              {/* Mock table screen */}
+              {layout === "1" && (
+                <div className="w-full h-full bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden">
+                  <div className="scale-[0.2] origin-center opacity-65">
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                  </div>
+                </div>
+              )}
+
+              {layout === "2-tb" && (
+                <div className="w-full h-full flex flex-col gap-1">
+                  <div className="flex-1 bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden rotate-180">
+                    <div className="scale-[0.1] origin-center opacity-65">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                  </div>
+                  <div className="flex-1 bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden">
+                    <div className="scale-[0.1] origin-center opacity-65">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {layout === "2-lr" && (
+                <div className="w-full h-full flex gap-1">
+                  <div className="flex-1 bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden rotate-90">
+                    <div className="scale-[0.1] origin-center opacity-65">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                  </div>
+                  <div className="flex-1 bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden -rotate-90">
+                    <div className="scale-[0.1] origin-center opacity-65">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {layout === "4" && (
+                <div className="w-full h-full grid grid-cols-2 gap-1">
+                  <div className="bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden rotate-180">
+                    <div className="scale-[0.05] origin-center opacity-65">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                  </div>
+                  <div className="bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden -rotate-90">
+                    <div className="scale-[0.05] origin-center opacity-65">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                  </div>
+                  <div className="bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden rotate-90">
+                    <div className="scale-[0.05] origin-center opacity-65">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                  </div>
+                  <div className="bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden">
+                    <div className="scale-[0.05] origin-center opacity-65">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </aside>
+
+        {/* Main interactive Canvas Panel */}
+        <main className="lg:col-span-8 bg-[#09090d] flex flex-col p-4 md:p-6 overflow-hidden">
+          {/* Header instructions */}
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-4 bg-[#111219] p-4 rounded-2xl border border-gray-900">
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <Maximize2 className="w-4 h-4 text-purple-400 animate-pulse" /> Active Presenter Workspace
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Drag the canvas with your mouse to pan, scroll to zoom. Changes mirror immediately to all connected clients.
+              </p>
+            </div>
+            <button
+              onClick={handleResetCanvas}
+              disabled={!imgUrl}
+              className="px-3 py-1.5 bg-gray-950 hover:bg-gray-900 border border-gray-800 hover:border-purple-500/40 text-gray-300 rounded-xl text-xs transition-all font-mono"
+            >
+              Reset Center
+            </button>
+          </div>
+
+          {/* Interactive Canvas container */}
+          <div className="flex-1 min-h-[350px] relative">
+            <InteractiveCanvas
+              imgUrl={imgUrl}
+              x={x}
+              y={y}
+              scale={scale}
+              onChange={handleCanvasChange}
+            />
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+};

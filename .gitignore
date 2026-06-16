@@ -1,0 +1,10 @@
+# Go binaries, builds & local files
+backend/topview-server
+backend/uploads/
+backend/dist/
+
+# Node/React builds & packages
+frontend/node_modules/
+frontend/dist/
+.DS_Store
+*.local
