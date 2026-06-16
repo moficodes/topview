@@ -153,9 +153,11 @@ export const RoomClient: React.FC = () => {
     }
   };
 
-  // Compute exact maximized viewport sizing based on current layout and window boundaries
-  let viewW = 0;
-  let viewH = 0;
+  // Dimensions computation
+  let viewW = 0; // physical width of horizontal viewports
+  let viewH = 0; // physical height of horizontal viewports
+  let sideW = 0; // physical width of vertical viewports (before rotate)
+  let sideH = 0; // physical height of vertical viewports (before rotate)
   const gap = 16; // gap in pixels between viewports
 
   if (workspaceSize.width > 0 && workspaceSize.height > 0) {
@@ -171,40 +173,46 @@ export const RoomClient: React.FC = () => {
       viewW = width;
       viewH = height;
     } else if (layout === "2-lr") {
-      // 2 Columns. Each column has a vertical screen. Its visual aspect ratio on screen is (1 / aspect)
-      // We fit (1/aspect) inside slot of size ((workspaceSize.width - gap)/2, workspaceSize.height)
+      // 2 Columns of vertical screens. Each column is (workspaceSize.width - gap)/2 wide.
       const slotW = (workspaceSize.width - gap) / 2;
       const slotH = workspaceSize.height;
-      
-      let fitW = 0;
-      let fitH = 0;
       const invAspect = 1 / aspect;
       if (slotW / slotH > invAspect) {
-        fitH = slotH;
-        fitW = slotH * invAspect;
+        viewH = slotW / invAspect;
+        viewW = slotW;
       } else {
-        fitW = slotW;
-        fitH = slotW / invAspect;
+        viewW = slotH * invAspect;
+        viewH = slotH;
       }
-      // Since it is rotated 90/270, its physical width is fitH and physical height is fitW
-      viewW = fitH;
-      viewH = fitW;
     } else if (layout === "3-trb" || layout === "3-tlb") {
       // 2 Columns: Center stack (2 rows) and 1 Side column
-      // Fits horizontal aspect ratio perfectly in a 2-column tabletop setup without overlap
+      // Fits horizontal aspect ratio perfectly in a 2-column tabletop setup without overlap.
+      // Maximum center viewport height h:
       const hWidthLimit = (workspaceSize.width - gap) / (1 + aspect);
       const hHeightLimit = (workspaceSize.height - gap) / 2;
       const h = Math.min(hWidthLimit, hHeightLimit);
+      
       viewH = h;
       viewW = h * aspect;
+      
+      // Side vertical screen matches the exact visual height of the center stack (2 * h + gap)
+      // Since it is rotated 90/270deg, its physical width is (2 * h + gap) and physical height is h.
+      sideW = 2 * h + gap;
+      sideH = h;
     } else if (layout === "4") {
       // 3 Columns: West (side), Center Stack (2 rows), East (side)
-      // Exactly matches the user's drawing layout (Image 1) with zero overlap
+      // Maximum center viewport height h:
       const hWidthLimit = (workspaceSize.width - 2 * gap) / (2 + aspect);
       const hHeightLimit = (workspaceSize.height - gap) / 2;
       const h = Math.min(hWidthLimit, hHeightLimit);
+      
       viewH = h;
       viewW = h * aspect;
+      
+      // Side vertical screens match the exact visual height of the center stack (2 * h + gap)
+      // Since they are rotated 90/270deg, physical width is (2 * h + gap) and physical height is h.
+      sideW = 2 * h + gap;
+      sideH = h;
     }
   }
 
@@ -360,10 +368,10 @@ export const RoomClient: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Right Column: East (Rotated 270°) */}
+                {/* Right Column: East (Rotated 270°) - Taller than it is long */}
                 <div className="flex items-center justify-center">
                   <div 
-                    style={{ width: `${viewH}px`, height: `${viewW}px` }}
+                    style={{ width: `${sideW}px`, height: `${sideH}px` }}
                     className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform -rotate-90 m-auto"
                   >
                     <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -377,10 +385,10 @@ export const RoomClient: React.FC = () => {
 
             {layout === "3-tlb" && (
               <div className="flex gap-4 items-center justify-center w-full h-full">
-                {/* Left Column: West (Rotated 90°) */}
+                {/* Left Column: West (Rotated 90°) - Taller than it is long */}
                 <div className="flex items-center justify-center">
                   <div 
-                    style={{ width: `${viewH}px`, height: `${viewW}px` }}
+                    style={{ width: `${sideW}px`, height: `${sideH}px` }}
                     className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-90 m-auto"
                   >
                     <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -419,10 +427,10 @@ export const RoomClient: React.FC = () => {
 
             {layout === "4" && (
               <div className="flex gap-4 items-center justify-center w-full h-full">
-                {/* Left Column: West (Rotated 90°) */}
+                {/* Left Column: West (Rotated 90°) - Taller than it is long */}
                 <div className="flex items-center justify-center">
                   <div 
-                    style={{ width: `${viewH}px`, height: `${viewW}px` }}
+                    style={{ width: `${sideW}px`, height: `${sideH}px` }}
                     className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-90 m-auto"
                   >
                     <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -457,10 +465,10 @@ export const RoomClient: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Right Column: East (Rotated 270°) */}
+                {/* Right Column: East (Rotated 270°) - Taller than it is long */}
                 <div className="flex items-center justify-center">
                   <div 
-                    style={{ width: `${viewH}px`, height: `${viewW}px` }}
+                    style={{ width: `${sideW}px`, height: `${sideH}px` }}
                     className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform -rotate-90 m-auto"
                   >
                     <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />

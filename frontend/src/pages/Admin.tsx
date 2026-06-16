@@ -254,6 +254,7 @@ export const Admin: React.FC = () => {
 
     let viewW = 0;
     let viewH = 0;
+    let isSwapped = rotateDeg === 90 || rotateDeg === 270;
 
     if (layoutType === "1") {
       const { width, height } = fitAspectRatio(containerSize, containerSize, aspectRatio);
@@ -274,21 +275,37 @@ export const Admin: React.FC = () => {
         viewW = slotH * invAspect;
         viewH = slotH;
       }
+      isSwapped = false; // already swapped in raw variables
     } else if (layoutType === "3-trb" || layoutType === "3-tlb") {
       const hWidthLimit = (containerSize - gap) / (1 + aspect);
       const hHeightLimit = (containerSize - gap) / 2;
       const h = Math.min(hWidthLimit, hHeightLimit);
-      viewH = h;
-      viewW = h * aspect;
+      
+      if (rotateDeg === 90 || rotateDeg === 270) {
+        // Physical dimensions before rotation: width is the stack height, height is h
+        viewW = 2 * h + gap;
+        viewH = h;
+      } else {
+        viewW = h * aspect;
+        viewH = h;
+      }
+      isSwapped = false; // already mapped physically
     } else if (layoutType === "4") {
       const hWidthLimit = (containerSize - 2 * gap) / (2 + aspect);
       const hHeightLimit = (containerSize - gap) / 2;
       const h = Math.min(hWidthLimit, hHeightLimit);
-      viewH = h;
-      viewW = h * aspect;
+      
+      if (rotateDeg === 90 || rotateDeg === 270) {
+        // Physical dimensions before rotation: width is the stack height, height is h
+        viewW = 2 * h + gap;
+        viewH = h;
+      } else {
+        viewW = h * aspect;
+        viewH = h;
+      }
+      isSwapped = false; // already mapped physically
     }
 
-    const isSwapped = rotateDeg === 90 || rotateDeg === 270;
     return {
       width: `${isSwapped ? viewH : viewW}px`,
       height: `${isSwapped ? viewW : viewH}px`,
@@ -305,6 +322,7 @@ export const Admin: React.FC = () => {
 
     let viewW = 0;
     let viewH = 0;
+    let isSwapped = rotateDeg === 90 || rotateDeg === 270;
 
     if (layoutType === "1") {
       const { width, height } = fitAspectRatio(widthContainer, heightContainer, aspectRatio);
@@ -325,21 +343,35 @@ export const Admin: React.FC = () => {
         viewW = slotH * invAspect;
         viewH = slotH;
       }
+      isSwapped = false; // already swapped in raw variables
     } else if (layoutType === "3-trb" || layoutType === "3-tlb") {
       const hWidthLimit = (widthContainer - gap) / (1 + aspect);
       const hHeightLimit = (heightContainer - gap) / 2;
       const h = Math.min(hWidthLimit, hHeightLimit);
-      viewH = h;
-      viewW = h * aspect;
+      
+      if (rotateDeg === 90 || rotateDeg === 270) {
+        viewW = 2 * h + gap;
+        viewH = h;
+      } else {
+        viewW = h * aspect;
+        viewH = h;
+      }
+      isSwapped = false; // already mapped physically
     } else if (layoutType === "4") {
       const hWidthLimit = (widthContainer - 2 * gap) / (2 + aspect);
       const hHeightLimit = (heightContainer - gap) / 2;
       const h = Math.min(hWidthLimit, hHeightLimit);
-      viewH = h;
-      viewW = h * aspect;
+      
+      if (rotateDeg === 90 || rotateDeg === 270) {
+        viewW = 2 * h + gap;
+        viewH = h;
+      } else {
+        viewW = h * aspect;
+        viewH = h;
+      }
+      isSwapped = false; // already mapped physically
     }
 
-    const isSwapped = rotateDeg === 90 || rotateDeg === 270;
     return {
       width: `${isSwapped ? viewH : viewW}px`,
       height: `${isSwapped ? viewW : viewH}px`,
