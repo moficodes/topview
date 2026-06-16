@@ -620,7 +620,7 @@ export const Admin: React.FC = () => {
               <div 
                 className="w-full bg-gray-950 rounded-lg border border-gray-900/80 overflow-hidden relative p-1"
                 style={{
-                  aspectRatio: aspectRatio.replace(":", "/"),
+                  aspectRatio: (aspectRatio || "16:9").replace(":", "/"),
                 }}
               >
                 <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent pointer-events-none" />

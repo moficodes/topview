@@ -81,7 +81,11 @@ export const RoomClient: React.FC = () => {
         const msg = JSON.parse(event.data);
         if (msg.type === "init" || msg.type === "state_update") {
           console.log(`[Client:${roomId}] State received:`, msg.payload);
-          setState(msg.payload);
+          setState((prev) => ({
+            ...prev,
+            ...msg.payload,
+            aspectRatio: msg.payload.aspectRatio || prev.aspectRatio || "16:9",
+          }));
         }
       } catch (err) {
         console.error("Failed to parse websocket message:", err);
@@ -126,8 +130,11 @@ export const RoomClient: React.FC = () => {
   const { imgUrl, x, y, scale, layout, aspectRatio } = state;
 
   // Calculates viewport dimensions to fit perfectly inside container bounds maintaining aspect ratio (contain fit)
-  const calculateViewportSize = (availW: number, availH: number, ratioStr: string) => {
-    const [rw, rh] = ratioStr.split(":").map(Number);
+  const calculateViewportSize = (availW: number, availH: number, ratioStr: string = "16:9") => {
+    const safeRatio = ratioStr || "16:9";
+    const parts = safeRatio.split(":");
+    const rw = parts[0] ? Number(parts[0]) : 16;
+    const rh = parts[1] ? Number(parts[1]) : 9;
     const aspect = (rw && rh) ? rw / rh : 16 / 9;
     
     if (availW / availH > aspect) {
