@@ -256,6 +256,7 @@ export const Admin: React.FC = () => {
     let viewH = 0;
     let sideW = 0;
     let sideH = 0;
+    let isSwapped = rotateDeg === 90 || rotateDeg === 270;
 
     if (layoutType === "1") {
       const { width, height } = fitAspectRatio(containerSize, containerSize, aspectRatio);
@@ -269,13 +270,20 @@ export const Admin: React.FC = () => {
       const slotW = (containerSize - gap) / 2;
       const slotH = containerSize;
       const invAspect = 1 / aspect;
+      
+      let wVis = 0;
+      let hVis = 0;
       if (slotW / slotH > invAspect) {
-        viewH = slotW / invAspect;
-        viewW = slotW;
+        hVis = slotH;
+        wVis = slotH * invAspect;
       } else {
-        viewW = slotH * invAspect;
-        viewH = slotH;
+        wVis = slotW;
+        hVis = slotW / invAspect;
       }
+      
+      viewW = hVis; // physical width
+      viewH = wVis; // physical height
+      isSwapped = false; // already mapped physically
     } else if (layoutType === "3-trb" || layoutType === "3-tlb") {
       const hWidthLimit = (containerSize - gap) / (1 + aspect);
       const hHeightLimit = (containerSize - gap) / 2;
@@ -294,8 +302,6 @@ export const Admin: React.FC = () => {
       sideH = h;
     }
 
-    const isSwapped = rotateDeg === 90 || rotateDeg === 270;
-    
     if (layoutType === "2-lr") {
       if (isChild) {
         return { width: `${viewW}px`, height: `${viewH}px` };
@@ -325,6 +331,7 @@ export const Admin: React.FC = () => {
     let viewH = 0;
     let sideW = 0;
     let sideH = 0;
+    let isSwapped = rotateDeg === 90 || rotateDeg === 270;
 
     if (layoutType === "1") {
       const { width, height } = fitAspectRatio(widthContainer, heightContainer, aspectRatio);
@@ -338,13 +345,20 @@ export const Admin: React.FC = () => {
       const slotW = (widthContainer - gap) / 2;
       const slotH = heightContainer;
       const invAspect = 1 / aspect;
+      
+      let wVis = 0;
+      let hVis = 0;
       if (slotW / slotH > invAspect) {
-        viewH = slotW / invAspect;
-        viewW = slotW;
+        hVis = slotH;
+        wVis = slotH * invAspect;
       } else {
-        viewW = slotH * invAspect;
-        viewH = slotH;
+        wVis = slotW;
+        hVis = slotW / invAspect;
       }
+      
+      viewW = hVis; // physical width
+      viewH = wVis; // physical height
+      isSwapped = false; // already mapped physically
     } else if (layoutType === "3-trb" || layoutType === "3-tlb") {
       const hWidthLimit = (widthContainer - gap) / (1 + aspect);
       const hHeightLimit = (heightContainer - gap) / 2;
@@ -363,8 +377,6 @@ export const Admin: React.FC = () => {
       sideH = h;
     }
 
-    const isSwapped = rotateDeg === 90 || rotateDeg === 270;
-    
     if (layoutType === "2-lr") {
       if (isChild) {
         return { width: `${viewW}px`, height: `${viewH}px` };

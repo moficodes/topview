@@ -174,16 +174,24 @@ export const RoomClient: React.FC = () => {
       viewH = height;
     } else if (layout === "2-lr") {
       // 2 Columns of vertical screens. Each column is (workspaceSize.width - gap)/2 wide.
+      // Fits vertical aspect ratio (1 / aspect) inside the slot perfectly.
       const slotW = (workspaceSize.width - gap) / 2;
       const slotH = workspaceSize.height;
       const invAspect = 1 / aspect;
+      
+      let wVis = 0;
+      let hVis = 0;
       if (slotW / slotH > invAspect) {
-        viewH = slotW / invAspect;
-        viewW = slotW;
+        hVis = slotH;
+        wVis = slotH * invAspect;
       } else {
-        viewW = slotH * invAspect;
-        viewH = slotH;
+        wVis = slotW;
+        hVis = slotW / invAspect;
       }
+      
+      // Physical dimensions before rotation:
+      viewW = hVis; // physical width (becomes visual height)
+      viewH = wVis; // physical height (becomes visual width)
     } else if (layout === "3-trb" || layout === "3-tlb") {
       // 2 Columns: Center stack (2 rows) and 1 Side column
       // Fits horizontal aspect ratio perfectly in a 2-column tabletop setup without overlap.
@@ -318,7 +326,7 @@ export const RoomClient: React.FC = () => {
 
             {layout === "2-lr" && (
               <div className="flex gap-4 items-center justify-center w-full h-full">
-                {/* Left Viewport - rotated 90° */}
+                {/* Left Viewport - rotated 90° - perfectly spaced wrapper */}
                 <div 
                   style={{ width: `${viewH}px`, height: `${viewW}px` }}
                   className="flex items-center justify-center relative"
@@ -333,7 +341,7 @@ export const RoomClient: React.FC = () => {
                     </span>
                   </div>
                 </div>
-                {/* Right Viewport - rotated 270° */}
+                {/* Right Viewport - rotated 270° - perfectly spaced wrapper */}
                 <div 
                   style={{ width: `${viewH}px`, height: `${viewW}px` }}
                   className="flex items-center justify-center relative"
