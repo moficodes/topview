@@ -132,77 +132,81 @@ export const RoomClient: React.FC = () => {
 
   const { imgUrl, x, y, scale, layout, aspectRatio } = state;
 
-  // Calculates viewport physical dimensions to fit perfectly inside slot boundaries.
-  // Rotations at 90deg and 270deg swap visual width and height. To accommodate this,
-  // we fit a vertical box of (1/A) inside the slot and return physical width=H_fit, height=W_fit.
-  // This guarantees that when CSS rotates the element, it maps perfectly to the cell slot without overlaps.
-  const getViewportPhysicalSize = (slotW: number, slotH: number, ratioStr: string, rotateDeg: number) => {
-    const isSwapped = rotateDeg === 90 || rotateDeg === 270;
+  // Calculates viewport dimensions to fit perfectly inside container bounds maintaining aspect ratio (contain fit)
+  const calculateViewportSize = (availW: number, availH: number, ratioStr: string = "16:9") => {
     const safeRatio = ratioStr || "16:9";
     const parts = safeRatio.split(":");
     const rw = parts[0] ? Number(parts[0]) : 16;
     const rh = parts[1] ? Number(parts[1]) : 9;
-    const baseAspect = (rw && rh) ? rw / rh : 16 / 9;
+    const aspect = (rw && rh) ? rw / rh : 16 / 9;
     
-    // Swapped rotations (90 and 270) represent taller-than-wide vertical cells on screen
-    const aspect = isSwapped ? 1 / baseAspect : baseAspect;
-    
-    let fitW = 0;
-    let fitH = 0;
-    if (slotW / slotH > aspect) {
-      fitH = slotH;
-      fitW = slotH * aspect;
+    if (availW / availH > aspect) {
+      return {
+        width: availH * aspect,
+        height: availH,
+      };
     } else {
-      fitW = slotW;
-      fitH = slotW / aspect;
+      return {
+        width: availW,
+        height: availW / aspect,
+      };
     }
-    
-    return {
-      width: isSwapped ? fitH : fitW,
-      height: isSwapped ? fitW : fitH,
-    };
   };
 
-  // Sizing styles for viewports in current layout state
-  const getViewportStyles = (rotateDeg: number) => {
-    if (workspaceSize.width === 0 || workspaceSize.height === 0) {
-      return { width: "0px", height: "0px" };
-    }
-    
-    let slotW = workspaceSize.width;
-    let slotH = workspaceSize.height;
-    const gap = 16; // gap in pixels between viewports
-    
-    if (layout === "2-tb") {
-      slotH = (workspaceSize.height - gap) / 2;
+  // Compute exact maximized viewport sizing based on current layout and window boundaries
+  let viewW = 0;
+  let viewH = 0;
+  const gap = 16; // gap in pixels between viewports
+
+  if (workspaceSize.width > 0 && workspaceSize.height > 0) {
+    const [rw, rh] = (aspectRatio || "16:9").split(":").map(Number);
+    const aspect = (rw && rh) ? rw / rh : 16 / 9;
+
+    if (layout === "1") {
+      const { width, height } = calculateViewportSize(workspaceSize.width, workspaceSize.height, aspectRatio);
+      viewW = width;
+      viewH = height;
+    } else if (layout === "2-tb") {
+      const { width, height } = calculateViewportSize(workspaceSize.width, (workspaceSize.height - gap) / 2, aspectRatio);
+      viewW = width;
+      viewH = height;
     } else if (layout === "2-lr") {
-      slotW = (workspaceSize.width - gap) / 2;
-    } else if (layout === "4" || layout === "3-trb" || layout === "3-tlb") {
-      slotW = (workspaceSize.width - gap) / 2;
-      slotH = (workspaceSize.height - gap) / 2;
+      // 2 Columns. Each column has a vertical screen. Its visual aspect ratio on screen is (1 / aspect)
+      // We fit (1/aspect) inside slot of size ((workspaceSize.width - gap)/2, workspaceSize.height)
+      const slotW = (workspaceSize.width - gap) / 2;
+      const slotH = workspaceSize.height;
       
-      // For the 4-screen view, make Top/Bottom screens a little smaller and Left/Right screens a bit bigger
-      if (layout === "4") {
-        if (rotateDeg === 0 || rotateDeg === 180) {
-          // Top & Bottom smaller (multiply by 0.82)
-          slotW = slotW * 0.82;
-          slotH = slotH * 0.82;
-        } else if (rotateDeg === 90 || rotateDeg === 270) {
-          // Left & Right bigger (multiply by 1.05)
-          slotW = slotW * 1.05;
-          slotH = slotH * 1.05;
-        }
+      let fitW = 0;
+      let fitH = 0;
+      const invAspect = 1 / aspect;
+      if (slotW / slotH > invAspect) {
+        fitH = slotH;
+        fitW = slotH * invAspect;
+      } else {
+        fitW = slotW;
+        fitH = slotW / invAspect;
       }
+      // Since it is rotated 90/270, its physical width is fitH and physical height is fitW
+      viewW = fitH;
+      viewH = fitW;
+    } else if (layout === "3-trb" || layout === "3-tlb") {
+      // 2 Columns: Center stack (2 rows) and 1 Side column
+      // Fits horizontal aspect ratio perfectly in a 2-column tabletop setup without overlap
+      const hWidthLimit = (workspaceSize.width - gap) / (1 + aspect);
+      const hHeightLimit = (workspaceSize.height - gap) / 2;
+      const h = Math.min(hWidthLimit, hHeightLimit);
+      viewH = h;
+      viewW = h * aspect;
+    } else if (layout === "4") {
+      // 3 Columns: West (side), Center Stack (2 rows), East (side)
+      // Exactly matches the user's drawing layout (Image 1) with zero overlap
+      const hWidthLimit = (workspaceSize.width - 2 * gap) / (2 + aspect);
+      const hHeightLimit = (workspaceSize.height - gap) / 2;
+      const h = Math.min(hWidthLimit, hHeightLimit);
+      viewH = h;
+      viewW = h * aspect;
     }
-    
-    const { width, height } = getViewportPhysicalSize(slotW, slotH, aspectRatio, rotateDeg);
-    
-    return {
-      width: `${width}px`,
-      height: `${height}px`,
-      transition: "width 0.2s ease-out, height 0.2s ease-out",
-    };
-  };
+  }
 
   return (
     <div className="h-screen w-screen bg-[#06070a] text-gray-200 overflow-hidden flex flex-col relative select-none">
@@ -272,7 +276,7 @@ export const RoomClient: React.FC = () => {
             {/* Viewport render logic: Maximized and fitted mathematically with aspect ratio */}
             {layout === "1" && (
               <div 
-                style={getViewportStyles(0)}
+                style={{ width: `${viewW}px`, height: `${viewH}px` }}
                 className="bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900"
               >
                 <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -283,7 +287,7 @@ export const RoomClient: React.FC = () => {
               <div className="flex flex-col gap-4 items-center justify-center w-full h-full">
                 {/* Top Viewport - rotated 180° for opposite person */}
                 <div 
-                  style={getViewportStyles(180)}
+                  style={{ width: `${viewW}px`, height: `${viewH}px` }}
                   className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-180"
                 >
                   <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -293,7 +297,7 @@ export const RoomClient: React.FC = () => {
                 </div>
                 {/* Bottom Viewport - standard 0° for presenter */}
                 <div 
-                  style={getViewportStyles(0)}
+                  style={{ width: `${viewW}px`, height: `${viewH}px` }}
                   className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900"
                 >
                   <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -308,7 +312,7 @@ export const RoomClient: React.FC = () => {
               <div className="flex gap-4 items-center justify-center w-full h-full">
                 {/* Left Viewport - rotated 90° */}
                 <div 
-                  style={getViewportStyles(90)}
+                  style={{ width: `${viewW}px`, height: `${viewH}px` }}
                   className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-90"
                 >
                   <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -318,7 +322,7 @@ export const RoomClient: React.FC = () => {
                 </div>
                 {/* Right Viewport - rotated 270° (-90°) */}
                 <div 
-                  style={getViewportStyles(270)}
+                  style={{ width: `${viewW}px`, height: `${viewH}px` }}
                   className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform -rotate-90"
                 >
                   <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -330,129 +334,140 @@ export const RoomClient: React.FC = () => {
             )}
 
             {layout === "3-trb" && (
-              <div className="grid grid-cols-2 gap-4 items-center justify-center">
-                {/* Top Left: North (Rotated 180°) */}
-                <div 
-                  style={getViewportStyles(180)}
-                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-180 m-auto"
-                >
-                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
-                    North (180°)
-                  </span>
+              <div className="flex gap-4 items-center justify-center w-full h-full">
+                {/* Center Column: North and South Stack */}
+                <div className="flex flex-col gap-4 items-center justify-center">
+                  {/* Top: North (Rotated 180°) */}
+                  <div 
+                    style={{ width: `${viewW}px`, height: `${viewH}px` }}
+                    className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-180 m-auto"
+                  >
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                      North (180°)
+                    </span>
+                  </div>
+
+                  {/* Bottom: South (Rotated 0°) */}
+                  <div 
+                    style={{ width: `${viewW}px`, height: `${viewH}px` }}
+                    className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 m-auto"
+                  >
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                      South (0°)
+                    </span>
+                  </div>
                 </div>
 
-                {/* Top Right: East (Rotated 270°) */}
-                <div 
-                  style={getViewportStyles(270)}
-                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform -rotate-90 m-auto"
-                >
-                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
-                    East (270°)
-                  </span>
-                </div>
-
-                {/* Bottom Left: Spacer (West omitted) */}
-                <div style={getViewportStyles(90)} className="m-auto opacity-0 pointer-events-none" />
-
-                {/* Bottom Right: South (Rotated 0°) */}
-                <div 
-                  style={getViewportStyles(0)}
-                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 m-auto"
-                >
-                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
-                    South (0°)
-                  </span>
+                {/* Right Column: East (Rotated 270°) */}
+                <div className="flex items-center justify-center">
+                  <div 
+                    style={{ width: `${viewH}px`, height: `${viewW}px` }}
+                    className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform -rotate-90 m-auto"
+                  >
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                      East (270°)
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
 
             {layout === "3-tlb" && (
-              <div className="grid grid-cols-2 gap-4 items-center justify-center">
-                {/* Top Left: North (Rotated 180°) */}
-                <div 
-                  style={getViewportStyles(180)}
-                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-180 m-auto"
-                >
-                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
-                    North (180°)
-                  </span>
+              <div className="flex gap-4 items-center justify-center w-full h-full">
+                {/* Left Column: West (Rotated 90°) */}
+                <div className="flex items-center justify-center">
+                  <div 
+                    style={{ width: `${viewH}px`, height: `${viewW}px` }}
+                    className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-90 m-auto"
+                  >
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                      West (90°)
+                    </span>
+                  </div>
                 </div>
 
-                {/* Top Right: Spacer (East Omitted) */}
-                <div style={getViewportStyles(270)} className="m-auto opacity-0 pointer-events-none" />
+                {/* Right Column: North and South Stack */}
+                <div className="flex flex-col gap-4 items-center justify-center">
+                  {/* Top: North (Rotated 180°) */}
+                  <div 
+                    style={{ width: `${viewW}px`, height: `${viewH}px` }}
+                    className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-180 m-auto"
+                  >
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                      North (180°)
+                    </span>
+                  </div>
 
-                {/* Bottom Left: West (Rotated 90°) */}
-                <div 
-                  style={getViewportStyles(90)}
-                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-90 m-auto"
-                >
-                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
-                    West (90°)
-                  </span>
-                </div>
-
-                {/* Bottom Right: South (Rotated 0°) */}
-                <div 
-                  style={getViewportStyles(0)}
-                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 m-auto"
-                >
-                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
-                    South (0°)
-                  </span>
+                  {/* Bottom: South (Rotated 0°) */}
+                  <div 
+                    style={{ width: `${viewW}px`, height: `${viewH}px` }}
+                    className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 m-auto"
+                  >
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                      South (0°)
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
 
             {layout === "4" && (
-              <div className="grid grid-cols-2 gap-4 items-center justify-center">
-                {/* Top Left: North User (Rotated 180°) */}
-                <div 
-                  style={getViewportStyles(180)}
-                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-180 m-auto"
-                >
-                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
-                    North (180°)
-                  </span>
+              <div className="flex gap-4 items-center justify-center w-full h-full">
+                {/* Left Column: West (Rotated 90°) */}
+                <div className="flex items-center justify-center">
+                  <div 
+                    style={{ width: `${viewH}px`, height: `${viewW}px` }}
+                    className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-90 m-auto"
+                  >
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                      West (90°)
+                    </span>
+                  </div>
                 </div>
 
-                {/* Top Right: East User (Rotated 270° / -90°) */}
-                <div 
-                  style={getViewportStyles(270)}
-                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform -rotate-90 m-auto"
-                >
-                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
-                    East (270°)
-                  </span>
+                {/* Center Column: North and South Stack */}
+                <div className="flex flex-col gap-4 items-center justify-center">
+                  {/* Top: North (Rotated 180°) */}
+                  <div 
+                    style={{ width: `${viewW}px`, height: `${viewH}px` }}
+                    className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-180 m-auto"
+                  >
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                      North (180°)
+                    </span>
+                  </div>
+
+                  {/* Bottom: South (Rotated 0°) */}
+                  <div 
+                    style={{ width: `${viewW}px`, height: `${viewH}px` }}
+                    className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 m-auto"
+                  >
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                      South (0°)
+                    </span>
+                  </div>
                 </div>
 
-                {/* Bottom Left: West User (Rotated 90°) */}
-                <div 
-                  style={getViewportStyles(90)}
-                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-90 m-auto"
-                >
-                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
-                    West (90°)
-                  </span>
-                </div>
-
-                {/* Bottom Right: South User (Rotated 0°) */}
-                <div 
-                  style={getViewportStyles(0)}
-                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 m-auto"
-                >
-                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
-                    South (0°)
-                  </span>
+                {/* Right Column: East (Rotated 270°) */}
+                <div className="flex items-center justify-center">
+                  <div 
+                    style={{ width: `${viewH}px`, height: `${viewW}px` }}
+                    className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform -rotate-90 m-auto"
+                  >
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                      East (270°)
+                    </span>
+                  </div>
                 </div>
               </div>
             )}

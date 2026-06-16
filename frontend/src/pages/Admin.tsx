@@ -230,103 +230,119 @@ export const Admin: React.FC = () => {
     }
   };
 
-  // Calculates viewport physical dimensions to fit perfectly inside slot boundaries.
-  // Swapped rotations (90 and 270) represent taller-than-wide vertical cells on screen.
-  const getViewportPhysicalSize = (slotW: number, slotH: number, ratioStr: string, rotateDeg: number) => {
-    const isSwapped = rotateDeg === 90 || rotateDeg === 270;
+  // Helper to fit a bounding area maintaining aspect ratio
+  const fitAspectRatio = (availW: number, availH: number, ratioStr: string) => {
     const safeRatio = ratioStr || "16:9";
     const parts = safeRatio.split(":");
     const rw = parts[0] ? Number(parts[0]) : 16;
     const rh = parts[1] ? Number(parts[1]) : 9;
-    const baseAspect = (rw && rh) ? rw / rh : 16 / 9;
+    const aspect = (rw && rh) ? rw / rh : 16 / 9;
     
-    const aspect = isSwapped ? 1 / baseAspect : baseAspect;
-    
-    let fitW = 0;
-    let fitH = 0;
-    if (slotW / slotH > aspect) {
-      fitH = slotH;
-      fitW = slotH * aspect;
+    if (availW / availH > aspect) {
+      return { width: availH * aspect, height: availH };
     } else {
-      fitW = slotW;
-      fitH = slotW / aspect;
+      return { width: availW, height: availW / aspect };
     }
-    
-    return {
-      width: isSwapped ? fitH : fitW,
-      height: isSwapped ? fitW : fitH,
-    };
   };
 
   // Computes exact physical dimensions for a sidebar preview viewport
   const getPreviewStyles = (layoutType: string, rotateDeg: number) => {
     const containerSize = 184; // width and height of sidebar aspect-square content slot
-    let slotW = containerSize;
-    let slotH = containerSize;
     const gap = 4;
-    
-    if (layoutType === "2-tb") {
-      slotH = (containerSize - gap) / 2;
+    const [rw, rh] = (aspectRatio || "16:9").split(":").map(Number);
+    const aspect = (rw && rh) ? rw / rh : 16 / 9;
+
+    let viewW = 0;
+    let viewH = 0;
+
+    if (layoutType === "1") {
+      const { width, height } = fitAspectRatio(containerSize, containerSize, aspectRatio);
+      viewW = width;
+      viewH = height;
+    } else if (layoutType === "2-tb") {
+      const { width, height } = fitAspectRatio(containerSize, (containerSize - gap) / 2, aspectRatio);
+      viewW = width;
+      viewH = height;
     } else if (layoutType === "2-lr") {
-      slotW = (containerSize - gap) / 2;
-    } else if (layoutType === "4" || layoutType === "3-trb" || layoutType === "3-tlb") {
-      slotW = (containerSize - gap) / 2;
-      slotH = (containerSize - gap) / 2;
-      
-      // Top/Bottom smaller, Left/Right bigger inside layout "4"
-      if (layoutType === "4") {
-        if (rotateDeg === 0 || rotateDeg === 180) {
-          slotW = slotW * 0.82;
-          slotH = slotH * 0.82;
-        } else if (rotateDeg === 90 || rotateDeg === 270) {
-          slotW = slotW * 1.05;
-          slotH = slotH * 1.05;
-        }
+      const slotW = (containerSize - gap) / 2;
+      const slotH = containerSize;
+      const invAspect = 1 / aspect;
+      if (slotW / slotH > invAspect) {
+        viewH = slotW / invAspect;
+        viewW = slotW;
+      } else {
+        viewW = slotH * invAspect;
+        viewH = slotH;
       }
+    } else if (layoutType === "3-trb" || layoutType === "3-tlb") {
+      const hWidthLimit = (containerSize - gap) / (1 + aspect);
+      const hHeightLimit = (containerSize - gap) / 2;
+      const h = Math.min(hWidthLimit, hHeightLimit);
+      viewH = h;
+      viewW = h * aspect;
+    } else if (layoutType === "4") {
+      const hWidthLimit = (containerSize - 2 * gap) / (2 + aspect);
+      const hHeightLimit = (containerSize - gap) / 2;
+      const h = Math.min(hWidthLimit, hHeightLimit);
+      viewH = h;
+      viewW = h * aspect;
     }
-    
-    const { width, height } = getViewportPhysicalSize(slotW, slotH, aspectRatio, rotateDeg);
+
+    const isSwapped = rotateDeg === 90 || rotateDeg === 270;
     return {
-      width: `${width}px`,
-      height: `${height}px`,
+      width: `${isSwapped ? viewH : viewW}px`,
+      height: `${isSwapped ? viewW : viewH}px`,
     };
   };
 
   // Computes exact physical dimensions for the floating bottom-left client minimap viewports
   const getMinimapStyles = (layoutType: string, rotateDeg: number) => {
     const widthContainer = 176; // fixed width of minimap container
+    const gap = 2;
     const [rw, rh] = (aspectRatio || "16:9").split(":").map(Number);
     const aspect = (rw && rh) ? rw / rh : 16 / 9;
     const heightContainer = widthContainer / aspect;
-    
-    let slotW = widthContainer;
-    let slotH = heightContainer;
-    const gap = 2;
-    
-    if (layoutType === "2-tb") {
-      slotH = (heightContainer - gap) / 2;
+
+    let viewW = 0;
+    let viewH = 0;
+
+    if (layoutType === "1") {
+      const { width, height } = fitAspectRatio(widthContainer, heightContainer, aspectRatio);
+      viewW = width;
+      viewH = height;
+    } else if (layoutType === "2-tb") {
+      const { width, height } = fitAspectRatio(widthContainer, (heightContainer - gap) / 2, aspectRatio);
+      viewW = width;
+      viewH = height;
     } else if (layoutType === "2-lr") {
-      slotW = (widthContainer - gap) / 2;
-    } else if (layoutType === "4" || layoutType === "3-trb" || layoutType === "3-tlb") {
-      slotW = (widthContainer - gap) / 2;
-      slotH = (heightContainer - gap) / 2;
-      
-      // Top/Bottom smaller, Left/Right bigger inside layout "4"
-      if (layoutType === "4") {
-        if (rotateDeg === 0 || rotateDeg === 180) {
-          slotW = slotW * 0.82;
-          slotH = slotH * 0.82;
-        } else if (rotateDeg === 90 || rotateDeg === 270) {
-          slotW = slotW * 1.05;
-          slotH = slotH * 1.05;
-        }
+      const slotW = (widthContainer - gap) / 2;
+      const slotH = heightContainer;
+      const invAspect = 1 / aspect;
+      if (slotW / slotH > invAspect) {
+        viewH = slotW / invAspect;
+        viewW = slotW;
+      } else {
+        viewW = slotH * invAspect;
+        viewH = slotH;
       }
+    } else if (layoutType === "3-trb" || layoutType === "3-tlb") {
+      const hWidthLimit = (widthContainer - gap) / (1 + aspect);
+      const hHeightLimit = (heightContainer - gap) / 2;
+      const h = Math.min(hWidthLimit, hHeightLimit);
+      viewH = h;
+      viewW = h * aspect;
+    } else if (layoutType === "4") {
+      const hWidthLimit = (widthContainer - 2 * gap) / (2 + aspect);
+      const hHeightLimit = (heightContainer - gap) / 2;
+      const h = Math.min(hWidthLimit, hHeightLimit);
+      viewH = h;
+      viewW = h * aspect;
     }
-    
-    const { width, height } = getViewportPhysicalSize(slotW, slotH, aspectRatio, rotateDeg);
+
+    const isSwapped = rotateDeg === 90 || rotateDeg === 270;
     return {
-      width: `${width}px`,
-      height: `${height}px`,
+      width: `${isSwapped ? viewH : viewW}px`,
+      height: `${isSwapped ? viewW : viewH}px`,
     };
   };
 
