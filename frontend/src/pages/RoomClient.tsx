@@ -320,23 +320,33 @@ export const RoomClient: React.FC = () => {
               <div className="flex gap-4 items-center justify-center w-full h-full">
                 {/* Left Viewport - rotated 90° */}
                 <div 
-                  style={{ width: `${viewW}px`, height: `${viewH}px` }}
-                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-90"
+                  style={{ width: `${viewH}px`, height: `${viewW}px` }}
+                  className="flex items-center justify-center relative"
                 >
-                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
-                    Left Side (90°)
-                  </span>
+                  <div 
+                    style={{ width: `${viewW}px`, height: `${viewH}px`, position: "absolute", transform: "rotate(90deg)" }}
+                    className="bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900"
+                  >
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                      Left Side (90°)
+                    </span>
+                  </div>
                 </div>
-                {/* Right Viewport - rotated 270° (-90°) */}
+                {/* Right Viewport - rotated 270° */}
                 <div 
-                  style={{ width: `${viewW}px`, height: `${viewH}px` }}
-                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform -rotate-90"
+                  style={{ width: `${viewH}px`, height: `${viewW}px` }}
+                  className="flex items-center justify-center relative"
                 >
-                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
-                    Right Side (270°)
-                  </span>
+                  <div 
+                    style={{ width: `${viewW}px`, height: `${viewH}px`, position: "absolute", transform: "rotate(-90deg)" }}
+                    className="bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900"
+                  >
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                      Right Side (270°)
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
@@ -368,11 +378,14 @@ export const RoomClient: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Right Column: East (Rotated 270°) - Taller than it is long */}
-                <div className="flex items-center justify-center">
+                {/* Right Column: East (Rotated 270°) - Taller than it is long with absolute center wrapper */}
+                <div 
+                  style={{ width: `${sideH}px`, height: `${sideW}px` }}
+                  className="flex items-center justify-center relative"
+                >
                   <div 
-                    style={{ width: `${sideW}px`, height: `${sideH}px` }}
-                    className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform -rotate-90 m-auto"
+                    style={{ width: `${sideW}px`, height: `${sideH}px`, position: "absolute", transform: "rotate(-90deg)" }}
+                    className="bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900"
                   >
                     <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                     <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
@@ -385,11 +398,14 @@ export const RoomClient: React.FC = () => {
 
             {layout === "3-tlb" && (
               <div className="flex gap-4 items-center justify-center w-full h-full">
-                {/* Left Column: West (Rotated 90°) - Taller than it is long */}
-                <div className="flex items-center justify-center">
+                {/* Left Column: West (Rotated 90°) - Taller than it is long with absolute center wrapper */}
+                <div 
+                  style={{ width: `${sideH}px`, height: `${sideW}px` }}
+                  className="flex items-center justify-center relative"
+                >
                   <div 
-                    style={{ width: `${sideW}px`, height: `${sideH}px` }}
-                    className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-90 m-auto"
+                    style={{ width: `${sideW}px`, height: `${sideH}px`, position: "absolute", transform: "rotate(90deg)" }}
+                    className="bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900"
                   >
                     <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                     <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
@@ -427,11 +443,14 @@ export const RoomClient: React.FC = () => {
 
             {layout === "4" && (
               <div className="flex gap-4 items-center justify-center w-full h-full">
-                {/* Left Column: West (Rotated 90°) - Taller than it is long */}
-                <div className="flex items-center justify-center">
+                {/* Left Column: West (Rotated 90°) - Taller than it is long with absolute center wrapper */}
+                <div 
+                  style={{ width: `${sideH}px`, height: `${sideW}px` }}
+                  className="flex items-center justify-center relative"
+                >
                   <div 
-                    style={{ width: `${sideW}px`, height: `${sideH}px` }}
-                    className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-90 m-auto"
+                    style={{ width: `${sideW}px`, height: `${sideH}px`, position: "absolute", transform: "rotate(90deg)" }}
+                    className="bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900"
                   >
                     <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                     <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
@@ -465,11 +484,14 @@ export const RoomClient: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Right Column: East (Rotated 270°) - Taller than it is long */}
-                <div className="flex items-center justify-center">
+                {/* Right Column: East (Rotated 270°) - Taller than it is long with absolute center wrapper */}
+                <div 
+                  style={{ width: `${sideH}px`, height: `${sideW}px` }}
+                  className="flex items-center justify-center relative"
+                >
                   <div 
-                    style={{ width: `${sideW}px`, height: `${sideH}px` }}
-                    className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform -rotate-90 m-auto"
+                    style={{ width: `${sideW}px`, height: `${sideH}px`, position: "absolute", transform: "rotate(-90deg)" }}
+                    className="bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900"
                   >
                     <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                     <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
