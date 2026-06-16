@@ -246,10 +246,11 @@ export const Admin: React.FC = () => {
   // Computes exact physical dimensions for a sidebar preview viewport.
   // Mimics RoomClient's wrapper-based layouts with 100% precision.
   const getPreviewStyles = (layoutType: string, rotateDeg: number, isChild = false) => {
-    const containerSize = 184; // width and height of sidebar aspect-square content slot
+    const widthContainer = 184; // fixed width of preview container
     const gap = 4;
     const [rw, rh] = (aspectRatio || "16:9").split(":").map(Number);
     const aspect = (rw && rh) ? rw / rh : 16 / 9;
+    const heightContainer = widthContainer / aspect; // height scales precisely with aspect ratio
 
     let viewW = 0;
     let viewH = 0;
@@ -257,16 +258,16 @@ export const Admin: React.FC = () => {
     let sideH = 0;
 
     if (layoutType === "1") {
-      const { width, height } = fitAspectRatio(containerSize, containerSize, aspectRatio);
+      const { width, height } = fitAspectRatio(widthContainer, heightContainer, aspectRatio);
       viewW = width;
       viewH = height;
     } else if (layoutType === "2-tb") {
-      const { width, height } = fitAspectRatio(containerSize, (containerSize - gap) / 2, aspectRatio);
+      const { width, height } = fitAspectRatio(widthContainer, (heightContainer - gap) / 2, aspectRatio);
       viewW = width;
       viewH = height;
     } else if (layoutType === "2-lr") {
-      const slotW = (containerSize - gap) / 2;
-      const slotH = containerSize;
+      const slotW = (widthContainer - gap) / 2;
+      const slotH = heightContainer;
       const invAspect = 1 / aspect;
       
       let wVis = 0;
@@ -281,16 +282,16 @@ export const Admin: React.FC = () => {
       viewW = hVis; // physical width
       viewH = wVis; // physical height
     } else if (layoutType === "3-trb" || layoutType === "3-tlb") {
-      const hWidthLimit = (containerSize - gap) / (1 + aspect);
-      const hHeightLimit = (containerSize - gap) / 2;
+      const hWidthLimit = (widthContainer - gap) / (1 + aspect);
+      const hHeightLimit = (heightContainer - gap) / 2;
       const h = Math.min(hWidthLimit, hHeightLimit);
       viewH = h;
       viewW = h * aspect;
       sideW = 2 * h + gap;
       sideH = h;
     } else if (layoutType === "4") {
-      const hWidthLimit = (containerSize - 2 * gap) / (2 + aspect);
-      const hHeightLimit = (containerSize - gap) / 2;
+      const hWidthLimit = (widthContainer - 2 * gap) / (2 + aspect);
+      const hHeightLimit = (heightContainer - gap) / 2;
       const h = Math.min(hWidthLimit, hHeightLimit);
       viewH = h;
       viewW = h * aspect;
@@ -629,7 +630,12 @@ export const Admin: React.FC = () => {
               </span>
             </div>
 
-            <div className="aspect-square w-full max-w-[200px] mx-auto bg-gray-950 rounded-xl border border-gray-900 overflow-hidden relative flex p-2 items-center justify-center">
+            <div 
+              className="w-full max-w-[200px] mx-auto bg-gray-950 rounded-xl border border-gray-900 overflow-hidden relative flex p-2 items-center justify-center transition-all"
+              style={{
+                aspectRatio: (aspectRatio || "16:9").replace(":", "/"),
+              }}
+            >
               <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent pointer-events-none" />
 
               {/* Mock table screen */}
