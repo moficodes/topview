@@ -177,9 +177,22 @@ export const RoomClient: React.FC = () => {
       slotH = (workspaceSize.height - gap) / 2;
     } else if (layout === "2-lr") {
       slotW = (workspaceSize.width - gap) / 2;
-    } else if (layout === "4") {
+    } else if (layout === "4" || layout === "3-trb" || layout === "3-tlb") {
       slotW = (workspaceSize.width - gap) / 2;
       slotH = (workspaceSize.height - gap) / 2;
+      
+      // For the 4-screen view, make Top/Bottom screens a little smaller and Left/Right screens a bit bigger
+      if (layout === "4") {
+        if (rotateDeg === 0 || rotateDeg === 180) {
+          // Top & Bottom smaller (multiply by 0.82)
+          slotW = slotW * 0.82;
+          slotH = slotH * 0.82;
+        } else if (rotateDeg === 90 || rotateDeg === 270) {
+          // Left & Right bigger (multiply by 1.05)
+          slotW = slotW * 1.05;
+          slotH = slotH * 1.05;
+        }
+      }
     }
     
     const { width, height } = getViewportPhysicalSize(slotW, slotH, aspectRatio, rotateDeg);
@@ -311,6 +324,86 @@ export const RoomClient: React.FC = () => {
                   <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                   <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
                     Right Side (270°)
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {layout === "3-trb" && (
+              <div className="grid grid-cols-2 gap-4 items-center justify-center">
+                {/* Top Left: North (Rotated 180°) */}
+                <div 
+                  style={getViewportStyles(180)}
+                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-180 m-auto"
+                >
+                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                    North (180°)
+                  </span>
+                </div>
+
+                {/* Top Right: East (Rotated 270°) */}
+                <div 
+                  style={getViewportStyles(270)}
+                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform -rotate-90 m-auto"
+                >
+                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                    East (270°)
+                  </span>
+                </div>
+
+                {/* Bottom Left: Spacer (West omitted) */}
+                <div style={getViewportStyles(90)} className="m-auto opacity-0 pointer-events-none" />
+
+                {/* Bottom Right: South (Rotated 0°) */}
+                <div 
+                  style={getViewportStyles(0)}
+                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 m-auto"
+                >
+                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                    South (0°)
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {layout === "3-tlb" && (
+              <div className="grid grid-cols-2 gap-4 items-center justify-center">
+                {/* Top Left: North (Rotated 180°) */}
+                <div 
+                  style={getViewportStyles(180)}
+                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-180 m-auto"
+                >
+                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                    North (180°)
+                  </span>
+                </div>
+
+                {/* Top Right: Spacer (East Omitted) */}
+                <div style={getViewportStyles(270)} className="m-auto opacity-0 pointer-events-none" />
+
+                {/* Bottom Left: West (Rotated 90°) */}
+                <div 
+                  style={getViewportStyles(90)}
+                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-90 m-auto"
+                >
+                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                    West (90°)
+                  </span>
+                </div>
+
+                {/* Bottom Right: South (Rotated 0°) */}
+                <div 
+                  style={getViewportStyles(0)}
+                  className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 m-auto"
+                >
+                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                  <span className="absolute bottom-3 left-3 bg-black/60 border border-gray-900/60 px-2 py-0.5 rounded text-[9px] font-mono text-gray-500 uppercase tracking-widest select-none pointer-events-none">
+                    South (0°)
                   </span>
                 </div>
               </div>

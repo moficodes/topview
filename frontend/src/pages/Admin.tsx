@@ -269,9 +269,20 @@ export const Admin: React.FC = () => {
       slotH = (containerSize - gap) / 2;
     } else if (layoutType === "2-lr") {
       slotW = (containerSize - gap) / 2;
-    } else if (layoutType === "4") {
+    } else if (layoutType === "4" || layoutType === "3-trb" || layoutType === "3-tlb") {
       slotW = (containerSize - gap) / 2;
       slotH = (containerSize - gap) / 2;
+      
+      // Top/Bottom smaller, Left/Right bigger inside layout "4"
+      if (layoutType === "4") {
+        if (rotateDeg === 0 || rotateDeg === 180) {
+          slotW = slotW * 0.82;
+          slotH = slotH * 0.82;
+        } else if (rotateDeg === 90 || rotateDeg === 270) {
+          slotW = slotW * 1.05;
+          slotH = slotH * 1.05;
+        }
+      }
     }
     
     const { width, height } = getViewportPhysicalSize(slotW, slotH, aspectRatio, rotateDeg);
@@ -296,9 +307,20 @@ export const Admin: React.FC = () => {
       slotH = (heightContainer - gap) / 2;
     } else if (layoutType === "2-lr") {
       slotW = (widthContainer - gap) / 2;
-    } else if (layoutType === "4") {
+    } else if (layoutType === "4" || layoutType === "3-trb" || layoutType === "3-tlb") {
       slotW = (widthContainer - gap) / 2;
       slotH = (heightContainer - gap) / 2;
+      
+      // Top/Bottom smaller, Left/Right bigger inside layout "4"
+      if (layoutType === "4") {
+        if (rotateDeg === 0 || rotateDeg === 180) {
+          slotW = slotW * 0.82;
+          slotH = slotH * 0.82;
+        } else if (rotateDeg === 90 || rotateDeg === 270) {
+          slotW = slotW * 1.05;
+          slotH = slotH * 1.05;
+        }
+      }
     }
     
     const { width, height } = getViewportPhysicalSize(slotW, slotH, aspectRatio, rotateDeg);
@@ -510,6 +532,44 @@ export const Admin: React.FC = () => {
                 <div className="font-semibold text-xs">4 Copies</div>
                 <div className="text-[9px] text-gray-500">Full table round</div>
               </button>
+
+              {/* Preset 5: 3 Sided TRB */}
+              <button
+                onClick={() => handleLayoutChange("3-trb")}
+                className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
+                  layout === "3-trb"
+                    ? "border-purple-500 bg-purple-500/10 text-white"
+                    : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 grid grid-cols-2 gap-1 p-1">
+                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white rotate-180 m-auto">N</span>
+                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white -rotate-90 m-auto">E</span>
+                  <span className="w-3.5 h-3.5 rounded bg-gray-800/40 m-auto opacity-20"></span>
+                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white m-auto">S</span>
+                </div>
+                <div className="font-semibold text-xs">3 Copies (TRB)</div>
+                <div className="text-[9px] text-gray-500">No West seat</div>
+              </button>
+
+              {/* Preset 6: 3 Sided TLB */}
+              <button
+                onClick={() => handleLayoutChange("3-tlb")}
+                className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
+                  layout === "3-tlb"
+                    ? "border-purple-500 bg-purple-500/10 text-white"
+                    : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 grid grid-cols-2 gap-1 p-1">
+                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white rotate-180 m-auto">N</span>
+                  <span className="w-3.5 h-3.5 rounded bg-gray-800/40 m-auto opacity-20"></span>
+                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white rotate-90 m-auto">W</span>
+                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white m-auto">S</span>
+                </div>
+                <div className="font-semibold text-xs">3 Copies (TLB)</div>
+                <div className="text-[9px] text-gray-500">No East seat</div>
+              </button>
             </div>
           </div>
 
@@ -614,6 +674,36 @@ export const Admin: React.FC = () => {
                 </div>
               )}
 
+              {layout === "3-trb" && (
+                <div className="grid grid-cols-2 gap-1 items-center justify-center w-full h-full">
+                  <div style={getPreviewStyles("3-trb", 180)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden transform rotate-180 m-auto">
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                  </div>
+                  <div style={getPreviewStyles("3-trb", 270)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden transform -rotate-90 m-auto">
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                  </div>
+                  <div style={getPreviewStyles("3-trb", 90)} className="m-auto opacity-0 pointer-events-none" />
+                  <div style={getPreviewStyles("3-trb", 0)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden m-auto">
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                  </div>
+                </div>
+              )}
+
+              {layout === "3-tlb" && (
+                <div className="grid grid-cols-2 gap-1 items-center justify-center w-full h-full">
+                  <div style={getPreviewStyles("3-tlb", 180)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden transform rotate-180 m-auto">
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                  </div>
+                  <div style={getPreviewStyles("3-tlb", 270)} className="m-auto opacity-0 pointer-events-none" />
+                  <div style={getPreviewStyles("3-tlb", 90)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden transform rotate-90 m-auto">
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                  </div>
+                  <div style={getPreviewStyles("3-tlb", 0)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden m-auto">
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                  </div>
+                </div>
+              )}
+
               {layout === "4" && (
                 <div className="grid grid-cols-2 gap-1 items-center justify-center w-full h-full">
                   <div style={getPreviewStyles("4", 180)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden transform rotate-180 m-auto">
@@ -708,6 +798,36 @@ export const Admin: React.FC = () => {
                       <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                     </div>
                     <div style={getMinimapStyles("2-lr", 270)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform -rotate-90 m-auto">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                  </div>
+                )}
+
+                {layout === "3-trb" && (
+                  <div className="grid grid-cols-2 gap-0.5 items-center justify-center w-full h-full">
+                    <div style={getMinimapStyles("3-trb", 180)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform rotate-180 m-auto">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                    <div style={getMinimapStyles("3-trb", 270)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform -rotate-90 m-auto">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                    <div style={getMinimapStyles("3-trb", 90)} className="m-auto opacity-0 pointer-events-none" />
+                    <div style={getMinimapStyles("3-trb", 0)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden m-auto">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                  </div>
+                )}
+
+                {layout === "3-tlb" && (
+                  <div className="grid grid-cols-2 gap-0.5 items-center justify-center w-full h-full">
+                    <div style={getMinimapStyles("3-tlb", 180)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform rotate-180 m-auto">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                    <div style={getMinimapStyles("3-tlb", 270)} className="m-auto opacity-0 pointer-events-none" />
+                    <div style={getMinimapStyles("3-tlb", 90)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform rotate-90 m-auto">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                    <div style={getMinimapStyles("3-tlb", 0)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden m-auto">
                       <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                     </div>
                   </div>
