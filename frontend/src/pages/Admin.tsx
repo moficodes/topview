@@ -20,6 +20,7 @@ interface RoomState {
   y: number;
   scale: number;
   layout: string;
+  aspectRatio: string;
 }
 
 const PRESET_IMAGES = [
@@ -49,6 +50,7 @@ export const Admin: React.FC = () => {
   const [wsConnected, setWsConnected] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [imageUrlInput, setImageUrlInput] = useState("");
+  const [aspectRatio, setAspectRatio] = useState("16:9");
 
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -64,6 +66,7 @@ export const Admin: React.FC = () => {
       y: newState.y !== undefined ? newState.y : y,
       scale: newState.scale !== undefined ? newState.scale : scale,
       layout: newState.layout !== undefined ? newState.layout : layout,
+      aspectRatio: newState.aspectRatio !== undefined ? newState.aspectRatio : aspectRatio,
     };
 
     wsRef.current.send(
@@ -102,6 +105,7 @@ export const Admin: React.FC = () => {
           setY(p.y || 0);
           setScale(p.scale || 1);
           setLayout(p.layout || "1");
+          setAspectRatio(p.aspectRatio || "16:9");
         }
       } catch (err) {
         console.error("Error parsing WS message:", err);
@@ -431,6 +435,34 @@ export const Admin: React.FC = () => {
             </div>
           </div>
 
+          {/* Aspect Ratio Selection */}
+          <div className="space-y-3 pt-3 border-t border-gray-950">
+            <h3 className="text-xs font-bold font-mono text-gray-500 tracking-wider uppercase flex items-center gap-1.5">
+              Client Aspect Ratio
+            </h3>
+            <p className="text-[11px] text-gray-500">
+              Set the proportion of the screen layout viewports for the connected clients.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {["16:9", "16:10", "4:3", "1:1", "21:9"].map((ratio) => (
+                <button
+                  key={ratio}
+                  onClick={() => {
+                    setAspectRatio(ratio);
+                    sendStateUpdate({ aspectRatio: ratio });
+                  }}
+                  className={`flex-1 px-2.5 py-1.5 border text-xs font-mono rounded-lg font-semibold transition-all ${
+                    aspectRatio === ratio
+                      ? "border-purple-500 bg-purple-500/10 text-white"
+                      : "border-gray-800 bg-gray-950 text-gray-400 hover:text-gray-200 hover:border-gray-700"
+                  }`}
+                >
+                  {ratio}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Quick Controls */}
           <div className="space-y-3 pt-3 border-t border-gray-950">
             <h3 className="text-xs font-bold font-mono text-gray-500 tracking-wider uppercase">
@@ -572,6 +604,91 @@ export const Admin: React.FC = () => {
               scale={scale}
               onChange={handleCanvasChange}
             />
+
+            {/* Floating Live Client Minimap in the bottom-left corner */}
+            <div className="absolute bottom-4 left-4 z-30 bg-[#12131b]/80 backdrop-blur-md border border-gray-800 p-2.5 rounded-xl shadow-2xl w-44 md:w-52 pointer-events-none select-none transition-all">
+              <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-gray-800/60">
+                <span className="text-[9px] font-mono font-bold tracking-wider text-purple-400 uppercase">
+                  Client View Minimap
+                </span>
+                <span className="text-[8px] font-mono text-gray-500 font-semibold bg-gray-950 px-1 py-0.2 rounded">
+                  {aspectRatio}
+                </span>
+              </div>
+              
+              {/* Aspect Ratio Box Wrapper */}
+              <div 
+                className="w-full bg-gray-950 rounded-lg border border-gray-900/80 overflow-hidden relative p-1"
+                style={{
+                  aspectRatio: aspectRatio.replace(":", "/"),
+                }}
+              >
+                <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent pointer-events-none" />
+
+                {layout === "1" && (
+                  <div className="w-full h-full bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden">
+                    <div className="scale-[0.15] origin-center opacity-70">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                  </div>
+                )}
+
+                {layout === "2-tb" && (
+                  <div className="w-full h-full flex flex-col gap-0.5">
+                    <div className="flex-1 bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden rotate-180">
+                      <div className="scale-[0.08] origin-center opacity-70">
+                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                      </div>
+                    </div>
+                    <div className="flex-1 bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden">
+                      <div className="scale-[0.08] origin-center opacity-70">
+                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {layout === "2-lr" && (
+                  <div className="w-full h-full flex gap-0.5">
+                    <div className="flex-1 bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden rotate-90">
+                      <div className="scale-[0.08] origin-center opacity-70">
+                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                      </div>
+                    </div>
+                    <div className="flex-1 bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden -rotate-90">
+                      <div className="scale-[0.08] origin-center opacity-70">
+                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {layout === "4" && (
+                  <div className="w-full h-full grid grid-cols-2 gap-0.5">
+                    <div className="bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden rotate-180">
+                      <div className="scale-[0.04] origin-center opacity-70">
+                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                      </div>
+                    </div>
+                    <div className="bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden -rotate-90">
+                      <div className="scale-[0.04] origin-center opacity-70">
+                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                      </div>
+                    </div>
+                    <div className="bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden rotate-90">
+                      <div className="scale-[0.04] origin-center opacity-70">
+                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                      </div>
+                    </div>
+                    <div className="bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden">
+                      <div className="scale-[0.04] origin-center opacity-70">
+                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </main>
       </div>

@@ -17,12 +17,13 @@ import (
 
 // RoomState defines the state of a room's canvas and visual layout
 type RoomState struct {
-	RoomID string  `json:"roomId"`
-	ImgURL string  `json:"imgUrl"`
-	X      float64 `json:"x"`     // normalized X position (percentage)
-	Y      float64 `json:"y"`     // normalized Y position (percentage)
-	Scale  float64 `json:"scale"` // Zoom scale
-	Layout string  `json:"layout"` // "1", "2-top-bottom", "2-left-right", "4"
+	RoomID      string  `json:"roomId"`
+	ImgURL      string  `json:"imgUrl"`
+	X           float64 `json:"x"`           // normalized X position (percentage)
+	Y           float64 `json:"y"`           // normalized Y position (percentage)
+	Scale       float64 `json:"scale"`       // Zoom scale
+	Layout      string  `json:"layout"`      // "1", "2-top-bottom", "2-left-right", "4"
+	AspectRatio string  `json:"aspectRatio"`  // e.g., "16:9", "16:10", "4:3", "1:1"
 }
 
 // Room represents a dynamic room with its state and connected web sockets
@@ -65,12 +66,13 @@ func (h *Hub) getOrCreateRoom(roomID string) *Room {
 		room = &Room{
 			ID: roomID,
 			State: RoomState{
-				RoomID: roomID,
-				ImgURL: "", // empty initially
-				X:      0.0,
-				Y:      0.0,
-				Scale:  1.0,
-				Layout: "1", // default layout
+				RoomID:      roomID,
+				ImgURL:      "", // empty initially
+				X:           0.0,
+				Y:           0.0,
+				Scale:       1.0,
+				Layout:      "1", // default layout
+				AspectRatio: "16:9",
 			},
 			Clients: make(map[*websocket.Conn]string),
 		}
