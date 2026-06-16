@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -326,7 +327,14 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	port := flag.Int("port", 8080, "Port to run the backend server on")
+	portVal := 8080
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		if p, err := strconv.Atoi(envPort); err == nil {
+			portVal = p
+		}
+	}
+
+	port := flag.Int("port", portVal, "Port to run the backend server on")
 	flag.Parse()
 
 	// Ensure uploads directory exists

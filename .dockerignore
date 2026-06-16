@@ -1,0 +1,15 @@
+# Ignore local packages
+**/node_modules
+**/dist
+
+# Ignore local builds, uploads & databases
+backend/topview-server
+backend/uploads
+
+# Ignore git and local OS artifacts
+.git
+.gitignore
+.DS_Store
+.vscode
+.idea
+*.local
