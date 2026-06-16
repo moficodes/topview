@@ -230,6 +230,84 @@ export const Admin: React.FC = () => {
     }
   };
 
+  // Calculates viewport physical dimensions to fit perfectly inside slot boundaries.
+  // Swapped rotations (90 and 270) represent taller-than-wide vertical cells on screen.
+  const getViewportPhysicalSize = (slotW: number, slotH: number, ratioStr: string, rotateDeg: number) => {
+    const isSwapped = rotateDeg === 90 || rotateDeg === 270;
+    const safeRatio = ratioStr || "16:9";
+    const parts = safeRatio.split(":");
+    const rw = parts[0] ? Number(parts[0]) : 16;
+    const rh = parts[1] ? Number(parts[1]) : 9;
+    const baseAspect = (rw && rh) ? rw / rh : 16 / 9;
+    
+    const aspect = isSwapped ? 1 / baseAspect : baseAspect;
+    
+    let fitW = 0;
+    let fitH = 0;
+    if (slotW / slotH > aspect) {
+      fitH = slotH;
+      fitW = slotH * aspect;
+    } else {
+      fitW = slotW;
+      fitH = slotW / aspect;
+    }
+    
+    return {
+      width: isSwapped ? fitH : fitW,
+      height: isSwapped ? fitW : fitH,
+    };
+  };
+
+  // Computes exact physical dimensions for a sidebar preview viewport
+  const getPreviewStyles = (layoutType: string, rotateDeg: number) => {
+    const containerSize = 184; // width and height of sidebar aspect-square content slot
+    let slotW = containerSize;
+    let slotH = containerSize;
+    const gap = 4;
+    
+    if (layoutType === "2-tb") {
+      slotH = (containerSize - gap) / 2;
+    } else if (layoutType === "2-lr") {
+      slotW = (containerSize - gap) / 2;
+    } else if (layoutType === "4") {
+      slotW = (containerSize - gap) / 2;
+      slotH = (containerSize - gap) / 2;
+    }
+    
+    const { width, height } = getViewportPhysicalSize(slotW, slotH, aspectRatio, rotateDeg);
+    return {
+      width: `${width}px`,
+      height: `${height}px`,
+    };
+  };
+
+  // Computes exact physical dimensions for the floating bottom-left client minimap viewports
+  const getMinimapStyles = (layoutType: string, rotateDeg: number) => {
+    const widthContainer = 176; // fixed width of minimap container
+    const [rw, rh] = (aspectRatio || "16:9").split(":").map(Number);
+    const aspect = (rw && rh) ? rw / rh : 16 / 9;
+    const heightContainer = widthContainer / aspect;
+    
+    let slotW = widthContainer;
+    let slotH = heightContainer;
+    const gap = 2;
+    
+    if (layoutType === "2-tb") {
+      slotH = (heightContainer - gap) / 2;
+    } else if (layoutType === "2-lr") {
+      slotW = (widthContainer - gap) / 2;
+    } else if (layoutType === "4") {
+      slotW = (widthContainer - gap) / 2;
+      slotH = (heightContainer - gap) / 2;
+    }
+    
+    const { width, height } = getViewportPhysicalSize(slotW, slotH, aspectRatio, rotateDeg);
+    return {
+      width: `${width}px`,
+      height: `${height}px`,
+    };
+  };
+
   return (
     <div className="min-h-screen bg-[#0d0e12] text-gray-200 flex flex-col">
       {/* Navbar */}
@@ -504,69 +582,51 @@ export const Admin: React.FC = () => {
               </span>
             </div>
 
-            <div className="aspect-square w-full max-w-[200px] mx-auto bg-gray-950 rounded-xl border border-gray-900 overflow-hidden relative flex p-2">
+            <div className="aspect-square w-full max-w-[200px] mx-auto bg-gray-950 rounded-xl border border-gray-900 overflow-hidden relative flex p-2 items-center justify-center">
               <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent pointer-events-none" />
 
               {/* Mock table screen */}
               {layout === "1" && (
-                <div className="w-full h-full bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden">
-                  <div className="scale-[0.2] origin-center opacity-65">
+                <div style={getPreviewStyles("1", 0)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden m-auto">
+                  <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                </div>
+              )}
+
+              {layout === "2-tb" && (
+                <div className="w-full h-full flex flex-col gap-1 items-center justify-center">
+                  <div style={getPreviewStyles("2-tb", 180)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden transform rotate-180 m-auto">
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                  </div>
+                  <div style={getPreviewStyles("2-tb", 0)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden m-auto">
                     <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                   </div>
                 </div>
               )}
 
-              {layout === "2-tb" && (
-                <div className="w-full h-full flex flex-col gap-1">
-                  <div className="flex-1 bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden rotate-180">
-                    <div className="scale-[0.1] origin-center opacity-65">
-                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                    </div>
-                  </div>
-                  <div className="flex-1 bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden">
-                    <div className="scale-[0.1] origin-center opacity-65">
-                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {layout === "2-lr" && (
-                <div className="w-full h-full flex gap-1">
-                  <div className="flex-1 bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden rotate-90">
-                    <div className="scale-[0.1] origin-center opacity-65">
-                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                    </div>
+                <div className="w-full h-full flex gap-1 items-center justify-center">
+                  <div style={getPreviewStyles("2-lr", 90)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden transform rotate-90 m-auto">
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                   </div>
-                  <div className="flex-1 bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden -rotate-90">
-                    <div className="scale-[0.1] origin-center opacity-65">
-                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                    </div>
+                  <div style={getPreviewStyles("2-lr", 270)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden transform -rotate-90 m-auto">
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                   </div>
                 </div>
               )}
 
               {layout === "4" && (
-                <div className="w-full h-full grid grid-cols-2 gap-1">
-                  <div className="bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden rotate-180">
-                    <div className="scale-[0.05] origin-center opacity-65">
-                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                    </div>
+                <div className="grid grid-cols-2 gap-1 items-center justify-center w-full h-full">
+                  <div style={getPreviewStyles("4", 180)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden transform rotate-180 m-auto">
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                   </div>
-                  <div className="bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden -rotate-90">
-                    <div className="scale-[0.05] origin-center opacity-65">
-                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                    </div>
+                  <div style={getPreviewStyles("4", 270)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden transform -rotate-90 m-auto">
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                   </div>
-                  <div className="bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden rotate-90">
-                    <div className="scale-[0.05] origin-center opacity-65">
-                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                    </div>
+                  <div style={getPreviewStyles("4", 90)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden transform rotate-90 m-auto">
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                   </div>
-                  <div className="bg-[#171822] rounded border border-gray-800 flex items-center justify-center overflow-hidden">
-                    <div className="scale-[0.05] origin-center opacity-65">
-                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                    </div>
+                  <div style={getPreviewStyles("4", 0)} className="rounded border border-gray-800 bg-[#171822] overflow-hidden m-auto">
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                   </div>
                 </div>
               )}
@@ -618,7 +678,7 @@ export const Admin: React.FC = () => {
               
               {/* Aspect Ratio Box Wrapper */}
               <div 
-                className="w-full bg-gray-950 rounded-lg border border-gray-900/80 overflow-hidden relative p-1"
+                className="w-full bg-gray-950 rounded-lg border border-gray-900/80 overflow-hidden relative p-1 flex items-center justify-center"
                 style={{
                   aspectRatio: (aspectRatio || "16:9").replace(":", "/"),
                 }}
@@ -626,64 +686,46 @@ export const Admin: React.FC = () => {
                 <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent pointer-events-none" />
 
                 {layout === "1" && (
-                  <div className="w-full h-full bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden">
-                    <div className="scale-[0.15] origin-center opacity-70">
+                  <div style={getMinimapStyles("1", 0)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden m-auto">
+                    <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                  </div>
+                )}
+
+                {layout === "2-tb" && (
+                  <div className="w-full h-full flex flex-col gap-0.5 items-center justify-center">
+                    <div style={getMinimapStyles("2-tb", 180)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform rotate-180 m-auto">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
+                    </div>
+                    <div style={getMinimapStyles("2-tb", 0)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden m-auto">
                       <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                     </div>
                   </div>
                 )}
 
-                {layout === "2-tb" && (
-                  <div className="w-full h-full flex flex-col gap-0.5">
-                    <div className="flex-1 bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden rotate-180">
-                      <div className="scale-[0.08] origin-center opacity-70">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
-                    </div>
-                    <div className="flex-1 bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden">
-                      <div className="scale-[0.08] origin-center opacity-70">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
                 {layout === "2-lr" && (
-                  <div className="w-full h-full flex gap-0.5">
-                    <div className="flex-1 bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden rotate-90">
-                      <div className="scale-[0.08] origin-center opacity-70">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
+                  <div className="w-full h-full flex gap-0.5 items-center justify-center">
+                    <div style={getMinimapStyles("2-lr", 90)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform rotate-90 m-auto">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                     </div>
-                    <div className="flex-1 bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden -rotate-90">
-                      <div className="scale-[0.08] origin-center opacity-70">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
+                    <div style={getMinimapStyles("2-lr", 270)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform -rotate-90 m-auto">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                     </div>
                   </div>
                 )}
 
                 {layout === "4" && (
-                  <div className="w-full h-full grid grid-cols-2 gap-0.5">
-                    <div className="bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden rotate-180">
-                      <div className="scale-[0.04] origin-center opacity-70">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
+                  <div className="grid grid-cols-2 gap-0.5 items-center justify-center w-full h-full">
+                    <div style={getMinimapStyles("4", 180)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform rotate-180 m-auto">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                     </div>
-                    <div className="bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden -rotate-90">
-                      <div className="scale-[0.04] origin-center opacity-70">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
+                    <div style={getMinimapStyles("4", 270)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform -rotate-90 m-auto">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                     </div>
-                    <div className="bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden rotate-90">
-                      <div className="scale-[0.04] origin-center opacity-70">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
+                    <div style={getMinimapStyles("4", 90)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden transform rotate-90 m-auto">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                     </div>
-                    <div className="bg-[#171822] rounded border border-gray-800/40 flex items-center justify-center overflow-hidden">
-                      <div className="scale-[0.04] origin-center opacity-70">
-                        <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
-                      </div>
+                    <div style={getMinimapStyles("4", 0)} className="rounded border border-gray-800/40 bg-[#171822] overflow-hidden m-auto">
+                      <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
                     </div>
                   </div>
                 )}

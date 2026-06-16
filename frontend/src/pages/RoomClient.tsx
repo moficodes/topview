@@ -28,27 +28,30 @@ export const RoomClient: React.FC = () => {
   const [wsConnected, setWsConnected] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [dimensions, setDimensions] = useState({
-    width: window.innerWidth,
-    height: window.innerHeight,
-  });
+
+  // Measured main workspace space (reactive to parent flex container size, preventing scrollbars)
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const [workspaceSize, setWorkspaceSize] = useState({ width: 0, height: 0 });
 
   const wsRef = useRef<WebSocket | null>(null);
 
-  // Measure window dimensions in real-time
+  // ResizeObserver to dynamically measure exact container boundaries
   useEffect(() => {
-    const handleResize = () => {
-      setDimensions({
-        width: window.innerWidth,
-        height: window.innerHeight,
-      });
-    };
+    const observer = new ResizeObserver((entries) => {
+      if (entries.length > 0) {
+        const { width, height } = entries[0].contentRect;
+        setWorkspaceSize({ width, height });
+      }
+    });
 
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    if (workspaceRef.current) {
+      observer.observe(workspaceRef.current);
+    }
+
+    return () => observer.disconnect();
   }, []);
 
-  // Track browser fullscreen changes (such as Esc key exit)
+  // Track browser fullscreen changes
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
@@ -129,83 +132,67 @@ export const RoomClient: React.FC = () => {
 
   const { imgUrl, x, y, scale, layout, aspectRatio } = state;
 
-  // Calculates viewport dimensions to fit perfectly inside container bounds maintaining aspect ratio (contain fit)
-  const calculateViewportSize = (availW: number, availH: number, ratioStr: string = "16:9") => {
+  // Calculates viewport physical dimensions to fit perfectly inside slot boundaries.
+  // Rotations at 90deg and 270deg swap visual width and height. To accommodate this,
+  // we fit a vertical box of (1/A) inside the slot and return physical width=H_fit, height=W_fit.
+  // This guarantees that when CSS rotates the element, it maps perfectly to the cell slot without overlaps.
+  const getViewportPhysicalSize = (slotW: number, slotH: number, ratioStr: string, rotateDeg: number) => {
+    const isSwapped = rotateDeg === 90 || rotateDeg === 270;
     const safeRatio = ratioStr || "16:9";
     const parts = safeRatio.split(":");
     const rw = parts[0] ? Number(parts[0]) : 16;
     const rh = parts[1] ? Number(parts[1]) : 9;
-    const aspect = (rw && rh) ? rw / rh : 16 / 9;
+    const baseAspect = (rw && rh) ? rw / rh : 16 / 9;
     
-    if (availW / availH > aspect) {
-      // Height is the constraint
-      return {
-        width: availH * aspect,
-        height: availH,
-      };
+    // Swapped rotations (90 and 270) represent taller-than-wide vertical cells on screen
+    const aspect = isSwapped ? 1 / baseAspect : baseAspect;
+    
+    let fitW = 0;
+    let fitH = 0;
+    if (slotW / slotH > aspect) {
+      fitH = slotH;
+      fitW = slotH * aspect;
     } else {
-      // Width is the constraint
-      return {
-        width: availW,
-        height: availW / aspect,
-      };
+      fitW = slotW;
+      fitH = slotW / aspect;
     }
+    
+    return {
+      width: isSwapped ? fitH : fitW,
+      height: isSwapped ? fitW : fitH,
+    };
   };
 
-  // Compute exact maximized viewport sizing based on current layout and window boundaries
-  // We subtract padding to avoid elements touching the screen edges and HUD overlapping.
-  let viewW = 0;
-  let viewH = 0;
-  const horizontalPadding = 32;
-  const verticalPadding = 72; // extra padding at top for the floating HUDs
-
-  if (layout === "1") {
-    // 1 Full Screen Cell
-    const { width, height } = calculateViewportSize(
-      dimensions.width - horizontalPadding,
-      dimensions.height - verticalPadding,
-      aspectRatio
-    );
-    viewW = width;
-    viewH = height;
-  } else if (layout === "2-tb") {
-    // 2 Rows. Width is full screen, height is split in half
-    const { width, height } = calculateViewportSize(
-      dimensions.width - horizontalPadding,
-      (dimensions.height - verticalPadding - 16) / 2, // 16px row gap
-      aspectRatio
-    );
-    viewW = width;
-    viewH = height;
-  } else if (layout === "2-lr") {
-    // 2 Columns. Width is split in half, height is full screen
-    const { width, height } = calculateViewportSize(
-      (dimensions.width - horizontalPadding - 16) / 2, // 16px col gap
-      dimensions.height - verticalPadding,
-      aspectRatio
-    );
-    viewW = width;
-    viewH = height;
-  } else if (layout === "4") {
-    // 2x2 Grid. Both dimensions split in half
-    const { width, height } = calculateViewportSize(
-      (dimensions.width - horizontalPadding - 16) / 2,
-      (dimensions.height - verticalPadding - 16) / 2,
-      aspectRatio
-    );
-    viewW = width;
-    viewH = height;
-  }
-
-  // Common Viewport styles
-  const viewportStyle: React.CSSProperties = {
-    width: `${viewW}px`,
-    height: `${viewH}px`,
-    transition: "width 0.2s ease-out, height 0.2s ease-out",
+  // Sizing styles for viewports in current layout state
+  const getViewportStyles = (rotateDeg: number) => {
+    if (workspaceSize.width === 0 || workspaceSize.height === 0) {
+      return { width: "0px", height: "0px" };
+    }
+    
+    let slotW = workspaceSize.width;
+    let slotH = workspaceSize.height;
+    const gap = 16; // gap in pixels between viewports
+    
+    if (layout === "2-tb") {
+      slotH = (workspaceSize.height - gap) / 2;
+    } else if (layout === "2-lr") {
+      slotW = (workspaceSize.width - gap) / 2;
+    } else if (layout === "4") {
+      slotW = (workspaceSize.width - gap) / 2;
+      slotH = (workspaceSize.height - gap) / 2;
+    }
+    
+    const { width, height } = getViewportPhysicalSize(slotW, slotH, aspectRatio, rotateDeg);
+    
+    return {
+      width: `${width}px`,
+      height: `${height}px`,
+      transition: "width 0.2s ease-out, height 0.2s ease-out",
+    };
   };
 
   return (
-    <div className="min-h-screen w-screen bg-[#06070a] text-gray-200 overflow-hidden flex flex-col relative select-none">
+    <div className="h-screen w-screen bg-[#06070a] text-gray-200 overflow-hidden flex flex-col relative select-none">
       
       {/* Floating HUD - Left Side: Room details */}
       <div className="absolute top-4 left-4 z-50 flex items-center gap-2.5 bg-black/60 backdrop-blur-md px-3.5 py-1.5 border border-gray-900 rounded-full text-[11px] font-mono pointer-events-auto">
@@ -234,9 +221,11 @@ export const RoomClient: React.FC = () => {
         </button>
       </div>
 
-      {/* Main Presentation Work Space */}
-      <div className="flex-1 w-full h-full relative pt-16 p-4 flex items-center justify-center">
-        
+      {/* Main Presentation Workspace Area (sized exactly with padding-controlled flexbox) */}
+      <div 
+        ref={workspaceRef} 
+        className="flex-1 w-full relative pt-16 p-4 flex items-center justify-center overflow-hidden"
+      >
         {errorMsg && (
           <div className="absolute inset-0 bg-black/90 z-45 flex flex-col items-center justify-center p-6 text-center">
             <AlertTriangle className="w-12 h-12 text-yellow-500 animate-bounce mb-3" />
@@ -270,7 +259,7 @@ export const RoomClient: React.FC = () => {
             {/* Viewport render logic: Maximized and fitted mathematically with aspect ratio */}
             {layout === "1" && (
               <div 
-                style={viewportStyle}
+                style={getViewportStyles(0)}
                 className="bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900"
               >
                 <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -281,7 +270,7 @@ export const RoomClient: React.FC = () => {
               <div className="flex flex-col gap-4 items-center justify-center w-full h-full">
                 {/* Top Viewport - rotated 180° for opposite person */}
                 <div 
-                  style={viewportStyle}
+                  style={getViewportStyles(180)}
                   className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-180"
                 >
                   <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -291,7 +280,7 @@ export const RoomClient: React.FC = () => {
                 </div>
                 {/* Bottom Viewport - standard 0° for presenter */}
                 <div 
-                  style={viewportStyle}
+                  style={getViewportStyles(0)}
                   className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900"
                 >
                   <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -306,7 +295,7 @@ export const RoomClient: React.FC = () => {
               <div className="flex gap-4 items-center justify-center w-full h-full">
                 {/* Left Viewport - rotated 90° */}
                 <div 
-                  style={viewportStyle}
+                  style={getViewportStyles(90)}
                   className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-90"
                 >
                   <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -316,7 +305,7 @@ export const RoomClient: React.FC = () => {
                 </div>
                 {/* Right Viewport - rotated 270° (-90°) */}
                 <div 
-                  style={viewportStyle}
+                  style={getViewportStyles(270)}
                   className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform -rotate-90"
                 >
                   <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -331,7 +320,7 @@ export const RoomClient: React.FC = () => {
               <div className="grid grid-cols-2 gap-4 items-center justify-center">
                 {/* Top Left: North User (Rotated 180°) */}
                 <div 
-                  style={viewportStyle}
+                  style={getViewportStyles(180)}
                   className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-180 m-auto"
                 >
                   <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -342,7 +331,7 @@ export const RoomClient: React.FC = () => {
 
                 {/* Top Right: East User (Rotated 270° / -90°) */}
                 <div 
-                  style={viewportStyle}
+                  style={getViewportStyles(270)}
                   className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform -rotate-90 m-auto"
                 >
                   <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -353,7 +342,7 @@ export const RoomClient: React.FC = () => {
 
                 {/* Bottom Left: West User (Rotated 90°) */}
                 <div 
-                  style={viewportStyle}
+                  style={getViewportStyles(90)}
                   className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 transform rotate-90 m-auto"
                 >
                   <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
@@ -364,7 +353,7 @@ export const RoomClient: React.FC = () => {
 
                 {/* Bottom Right: South User (Rotated 0°) */}
                 <div 
-                  style={viewportStyle}
+                  style={getViewportStyles(0)}
                   className="relative bg-[#111219] rounded-2xl overflow-hidden shadow-2xl border border-gray-900 m-auto"
                 >
                   <InteractiveCanvas imgUrl={imgUrl} x={x} y={y} scale={scale} isReadOnly />
