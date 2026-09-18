@@ -45,10 +45,12 @@ type RoomState struct {
 }
 
 // SafeConn wraps a WebSocket connection with a mutex to prevent concurrent write panics
+// and an outbound channel for asynchronous bounded delivery.
 type SafeConn struct {
 	conn *websocket.Conn
 	mu   sync.Mutex
 	role string
+	send chan []byte
 }
 
 // WriteMessage is a concurrent-safe wrapper around write calls
@@ -57,6 +59,32 @@ func (sc *SafeConn) WriteMessage(messageType int, data []byte) error {
 	defer sc.mu.Unlock()
 	sc.conn.SetWriteDeadline(time.Now().Add(writeWait))
 	return sc.conn.WriteMessage(messageType, data)
+}
+
+func (sc *SafeConn) writePump() {
+	ticker := time.NewTicker(pingPeriod)
+	defer func() {
+		ticker.Stop()
+		sc.conn.Close()
+	}()
+
+	for {
+		select {
+		case message, ok := <-sc.send:
+			if !ok {
+				// The hub closed the channel
+				_ = sc.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			if err := sc.WriteMessage(websocket.TextMessage, message); err != nil {
+				return
+			}
+		case <-ticker.C:
+			if err := sc.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
 }
 
 // Room represents a dynamic room with its state and safe client connections
@@ -116,25 +144,28 @@ func (h *Hub) getOrCreateRoom(roomID string) *Room {
 }
 
 func (h *Hub) removeConnection(roomID string, sc *SafeConn) {
-	h.mu.RLock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	room, exists := h.rooms[roomID]
-	h.mu.RUnlock()
+	if !exists {
+		return
+	}
 
-	if exists {
-		room.mu.Lock()
+	room.mu.Lock()
+	if _, ok := room.Clients[sc]; ok {
 		delete(room.Clients, sc)
-		clientCount := len(room.Clients)
-		room.mu.Unlock()
+		close(sc.send)
+	}
+	clientCount := len(room.Clients)
+	room.mu.Unlock()
 
-		log.Printf("Disconnected client from room %s. Active clients: %d", roomID, clientCount)
+	log.Printf("Disconnected client from room %s. Active clients: %d", roomID, clientCount)
 
-		// Optionally clean up empty rooms
-		if clientCount == 0 {
-			h.mu.Lock()
-			delete(h.rooms, roomID)
-			h.mu.Unlock()
-			log.Printf("Cleaned up empty room: %s", roomID)
-		}
+	// Clean up empty rooms atomically under h.mu
+	if clientCount == 0 {
+		delete(h.rooms, roomID)
+		log.Printf("Cleaned up empty room: %s", roomID)
 	}
 }
 
@@ -207,17 +238,18 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	// Create safe wrapped connection
-	safeConn := &SafeConn{conn: conn, role: role}
+	safeConn := &SafeConn{
+		conn: conn,
+		role: role,
+		send: make(chan []byte, 32),
+	}
 	defer conn.Close()
 
 	room := hub.getOrCreateRoom(roomID)
 
 	room.mu.Lock()
-	room.Clients[safeConn] = role
 	currentState := room.State
 	room.mu.Unlock()
-
-	log.Printf("Connected %s to room %s. Total connections in room: %d", role, roomID, len(room.Clients))
 
 	// Configure WebSocket Heartbeat limits on raw conn (Cloud Run Compliance)
 	conn.SetReadLimit(10 << 20) // 10MB limit
@@ -234,25 +266,20 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	initBytes, err := json.Marshal(initMsg)
 	if err == nil {
-		_ = safeConn.WriteMessage(websocket.TextMessage, initBytes)
+		safeConn.send <- initBytes
 	}
 
-	// Start ping ticker goroutine for this specific connection
-	done := make(chan struct{})
-	go func(sc *SafeConn, ch chan struct{}) {
-		ticker := time.NewTicker(pingPeriod)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if err := sc.WriteMessage(websocket.PingMessage, nil); err != nil {
-					return
-				}
-			case <-ch:
-				return
-			}
-		}
-	}(safeConn, done)
+	// Start write pump goroutine for this specific connection
+	go safeConn.writePump()
+
+	room.mu.Lock()
+	room.Clients[safeConn] = role
+	clientCount := len(room.Clients)
+	room.mu.Unlock()
+
+	defer hub.removeConnection(roomID, safeConn)
+
+	log.Printf("Connected %s to room %s. Total connections in room: %d", role, roomID, clientCount)
 
 	// Read loop
 	for {
@@ -282,12 +309,13 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			room.mu.Lock()
 			room.State = msg.Payload
 			room.State.RoomID = roomID // ensure room ID is correct
+			currentState := room.State
 			room.mu.Unlock()
 
 			// Broadcast updated state to all connected clients in the room
 			broadcastMsg := WSMessage{
 				Type:    "state_update",
-				Payload: room.State,
+				Payload: currentState,
 			}
 			broadcastBytes, err := json.Marshal(broadcastMsg)
 			if err != nil {
@@ -301,20 +329,29 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				if clientConn == safeConn {
 					continue
 				}
-				go func(sc *SafeConn, b []byte) {
-					_ = sc.WriteMessage(websocket.TextMessage, b)
-				}(clientConn, broadcastBytes)
+				select {
+				case clientConn.send <- broadcastBytes:
+				default:
+					// Drop older frame to make room for newest state
+					select {
+					case <-clientConn.send:
+					default:
+					}
+					select {
+					case clientConn.send <- broadcastBytes:
+					default:
+					}
+				}
 			}
 			room.mu.Unlock()
 
 		case "ping":
-			_ = safeConn.WriteMessage(websocket.TextMessage, []byte(`{"type":"pong"}`))
+			select {
+			case safeConn.send <- []byte(`{"type":"pong"}`):
+			default:
+			}
 		}
 	}
-
-	// Cleanup connection
-	close(done)
-	hub.removeConnection(roomID, safeConn)
 }
 
 // Handle file uploads

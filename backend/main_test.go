@@ -15,7 +15,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -551,5 +553,273 @@ func TestSecurityHeaders(t *testing.T) {
 	}
 	if val := rec.Header().Get("X-Frame-Options"); val != "SAMEORIGIN" {
 		t.Errorf("expected X-Frame-Options: SAMEORIGIN, got %q", val)
+	}
+}
+
+func TestConcurrentBroadcast(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(handleWebSocket))
+	defer server.Close()
+
+	wsBaseURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	roomID := fmt.Sprintf("test-room-bcast-%d", time.Now().UnixNano())
+
+	// Connect Admin
+	adminURL := fmt.Sprintf("%s/ws?roomId=%s&role=admin", wsBaseURL, roomID)
+	adminConn, _, err := websocket.DefaultDialer.Dial(adminURL, nil)
+	if err != nil {
+		t.Fatalf("failed to connect admin: %v", err)
+	}
+	defer adminConn.Close()
+
+	var adminInit WSMessage
+	if err := adminConn.ReadJSON(&adminInit); err != nil {
+		t.Fatalf("failed to read admin init: %v", err)
+	}
+
+	// Connect 5 clients
+	const numClients = 5
+	const numUpdates = 50
+
+	clients := make([]*websocket.Conn, numClients)
+	for i := 0; i < numClients; i++ {
+		clientURL := fmt.Sprintf("%s/ws?roomId=%s&role=client", wsBaseURL, roomID)
+		conn, _, err := websocket.DefaultDialer.Dial(clientURL, nil)
+		if err != nil {
+			t.Fatalf("client %d failed to connect: %v", i, err)
+		}
+		defer conn.Close()
+
+		var clientInit WSMessage
+		if err := conn.ReadJSON(&clientInit); err != nil {
+			t.Fatalf("client %d failed to read init: %v", i, err)
+		}
+		clients[i] = conn
+	}
+
+	// Measure goroutines while connections are active
+	baselineGoroutines := runtime.NumGoroutine()
+
+	var wg sync.WaitGroup
+	receivedCounts := make([]int, numClients)
+	lastReceivedX := make([]float64, numClients)
+	var countMu sync.Mutex
+
+	for i := 0; i < numClients; i++ {
+		wg.Add(1)
+		go func(id int, conn *websocket.Conn) {
+			defer wg.Done()
+			for {
+				_ = conn.SetReadDeadline(time.Now().Add(4 * time.Second))
+				var msg WSMessage
+				err := conn.ReadJSON(&msg)
+				if err != nil {
+					return
+				}
+				if msg.Type == "state_update" {
+					countMu.Lock()
+					receivedCounts[id]++
+					lastReceivedX[id] = msg.Payload.X
+					reachedTarget := (msg.Payload.X == float64(numUpdates))
+					countMu.Unlock()
+					if reachedTarget {
+						return
+					}
+				}
+			}
+		}(i, clients[i])
+	}
+
+	// Rapidly fire 50 state updates from admin
+	for i := 1; i <= numUpdates; i++ {
+		update := WSMessage{
+			Type: "state_update",
+			Payload: RoomState{
+				RoomID:      roomID,
+				X:           float64(i),
+				Scale:       1.0,
+				Layout:      "1",
+				AspectRatio: "16:9",
+			},
+		}
+		if err := adminConn.WriteJSON(update); err != nil {
+			t.Fatalf("failed to send update %d: %v", i, err)
+		}
+	}
+
+	// Wait for clients to finish receiving updates
+	doneCh := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(doneCh)
+	}()
+
+	select {
+	case <-doneCh:
+		// Completed within timeout
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for clients to receive updates (hang or deadlocked)")
+	}
+
+	countMu.Lock()
+	for i := 0; i < numClients; i++ {
+		if receivedCounts[i] == 0 {
+			t.Errorf("client %d received 0 updates", i)
+		}
+		if lastReceivedX[i] != float64(numUpdates) {
+			t.Errorf("client %d last X was %v, expected %v", i, lastReceivedX[i], float64(numUpdates))
+		}
+	}
+	countMu.Unlock()
+
+	// Close all connections to verify clean shutdown without goroutine leak
+	_ = adminConn.Close()
+	for _, c := range clients {
+		_ = c.Close()
+	}
+
+	// Allow disconnect cleanup
+	time.Sleep(250 * time.Millisecond)
+
+	finalGoroutines := runtime.NumGoroutine()
+	// Goroutines should return to baseline (allowing small delta for runtime gc/sysmon)
+	if finalGoroutines > baselineGoroutines+5 {
+		t.Errorf("possible goroutine leak: baseline %d, final %d", baselineGoroutines, finalGoroutines)
+	}
+}
+
+func TestRoomPruningRace(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(handleWebSocket))
+	defer server.Close()
+
+	wsBaseURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	roomID := fmt.Sprintf("test-room-prune-%d", time.Now().UnixNano())
+
+	const numFlapping = 30
+	const numPersistent = 10
+
+	var wg sync.WaitGroup
+	persistentConns := make([]*websocket.Conn, numPersistent)
+
+	// Concurrently run flapping clients and persistent clients
+	for i := 0; i < numFlapping; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			url := fmt.Sprintf("%s/ws?roomId=%s&role=client", wsBaseURL, roomID)
+			conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+			if err != nil {
+				t.Errorf("flapping client %d dial failed: %v", id, err)
+				return
+			}
+			var initMsg WSMessage
+			_ = conn.ReadJSON(&initMsg)
+			time.Sleep(time.Duration(id%5) * time.Millisecond)
+			_ = conn.Close()
+		}(i)
+	}
+
+	for i := 0; i < numPersistent; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			url := fmt.Sprintf("%s/ws?roomId=%s&role=client", wsBaseURL, roomID)
+			conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+			if err != nil {
+				t.Errorf("persistent client %d dial failed: %v", id, err)
+				return
+			}
+			var initMsg WSMessage
+			if err := conn.ReadJSON(&initMsg); err != nil {
+				t.Errorf("persistent client %d read init failed: %v", id, err)
+				_ = conn.Close()
+				return
+			}
+			persistentConns[id] = conn
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Wait for server to finish processing all flapping disconnections
+	var room *Room
+	var exists bool
+	var activeCount int
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		hub.mu.RLock()
+		room, exists = hub.rooms[roomID]
+		hub.mu.RUnlock()
+		if exists {
+			room.mu.Lock()
+			activeCount = len(room.Clients)
+			room.mu.Unlock()
+			if activeCount == numPersistent {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if !exists {
+		t.Fatalf("expected room %s to exist in hub, but it was incorrectly pruned!", roomID)
+	}
+
+	if activeCount != numPersistent {
+		t.Errorf("expected %d active clients in room, got %d (clients were orphaned)", numPersistent, activeCount)
+	}
+
+	// Connect admin and broadcast an update; all persistent clients must receive it
+	adminURL := fmt.Sprintf("%s/ws?roomId=%s&role=admin", wsBaseURL, roomID)
+	adminConn, _, err := websocket.DefaultDialer.Dial(adminURL, nil)
+	if err != nil {
+		t.Fatalf("admin dial failed: %v", err)
+	}
+	defer adminConn.Close()
+
+	var adminInit WSMessage
+	_ = adminConn.ReadJSON(&adminInit)
+
+	updateMsg := WSMessage{
+		Type: "state_update",
+		Payload: RoomState{
+			RoomID: roomID,
+			Scale:  3.14,
+			Layout: "2-tb",
+		},
+	}
+	if err := adminConn.WriteJSON(updateMsg); err != nil {
+		t.Fatalf("admin write update failed: %v", err)
+	}
+
+	for i, conn := range persistentConns {
+		if conn == nil {
+			continue
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		var msg WSMessage
+		if err := conn.ReadJSON(&msg); err != nil {
+			t.Errorf("persistent client %d failed to receive broadcast: %v (likely orphaned)", i, err)
+		} else if msg.Payload.Scale != 3.14 {
+			t.Errorf("persistent client %d received unexpected scale: %v", i, msg.Payload.Scale)
+		}
+		_ = conn.Close()
+	}
+	_ = adminConn.Close()
+
+	// Poll until room is pruned after all persistent clients and admin disconnected
+	deadline = time.Now().Add(3 * time.Second)
+	stillExists := true
+	for time.Now().Before(deadline) {
+		hub.mu.RLock()
+		_, stillExists = hub.rooms[roomID]
+		hub.mu.RUnlock()
+		if !stillExists {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if stillExists {
+		t.Errorf("expected room %s to be pruned after all clients disconnected, but still exists in hub", roomID)
 	}
 }
