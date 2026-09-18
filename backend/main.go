@@ -159,8 +159,9 @@ var hub = &Hub{
 
 // WSMessage represents the structure of messages exchanged over WebSockets
 type WSMessage struct {
-	Type    string    `json:"type"` // "init", "state_update", "ping", "pong"
-	Payload RoomState `json:"payload,omitempty"`
+	Type      string    `json:"type"` // "init", "state_update", "ping", "pong"
+	Payload   RoomState `json:"payload,omitempty"`
+	ClientKey string    `json:"clientKey,omitempty"`
 }
 
 var upgrader = websocket.Upgrader{
@@ -260,16 +261,42 @@ func setupMiddleware(next http.Handler) http.Handler {
 
 // Handle WebSocket connection
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	roomID := r.URL.Query().Get("roomId")
-	role := r.URL.Query().Get("role") // "admin" or "client"
-
+	roomID := sanitizeRoomID(r.URL.Query().Get("roomId"))
 	if roomID == "" {
 		http.Error(w, "roomId query parameter is required", http.StatusBadRequest)
 		return
 	}
+	role := r.URL.Query().Get("role")
 	if role != "admin" {
 		role = "client"
 	}
+	key := r.URL.Query().Get("key")
+
+	hub.mu.Lock()
+	room, exists := hub.rooms[roomID]
+	if role == "admin" {
+		if !exists {
+			room = newRoom(roomID)
+			hub.rooms[roomID] = room
+		}
+		if key == "" || subtle.ConstantTimeCompare([]byte(key), []byte(room.AdminKey)) != 1 {
+			hub.mu.Unlock()
+			http.Error(w, "Invalid admin key", http.StatusUnauthorized)
+			return
+		}
+	} else {
+		if !exists {
+			hub.mu.Unlock()
+			http.Error(w, "Room not found", http.StatusNotFound)
+			return
+		}
+		if key == "" || subtle.ConstantTimeCompare([]byte(key), []byte(room.ClientKey)) != 1 {
+			hub.mu.Unlock()
+			http.Error(w, "Invalid client key", http.StatusUnauthorized)
+			return
+		}
+	}
+	hub.mu.Unlock()
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -285,8 +312,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	room := hub.getOrCreateRoom(roomID)
-
 	// Configure WebSocket Heartbeat limits on raw conn (Cloud Run Compliance)
 	conn.SetReadLimit(10 << 20) // 10MB limit
 	conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -295,7 +320,9 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
-	// Register client and queue initial state under room.mu atomically
+	// Register client and queue initial state atomically
+	hub.mu.Lock()
+	hub.rooms[roomID] = room
 	room.mu.Lock()
 	room.Clients[safeConn] = role
 	clientCount := len(room.Clients)
@@ -303,10 +330,14 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		Type:    "init",
 		Payload: room.State,
 	}
+	if role == "admin" {
+		initMsg.ClientKey = room.ClientKey
+	}
 	if initBytes, err := json.Marshal(initMsg); err == nil {
 		safeConn.send <- initBytes
 	}
 	room.mu.Unlock()
+	hub.mu.Unlock()
 
 	// Start write pump goroutine for this specific connection
 	go safeConn.writePump()

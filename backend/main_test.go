@@ -339,15 +339,205 @@ func TestRoomState_Validation(t *testing.T) {
 	})
 }
 
+func createTestRoom(t *testing.T, roomID string) (string, string) {
+	t.Helper()
+	createBody := fmt.Sprintf(`{"roomId": %q}`, roomID)
+	req := httptest.NewRequest(http.MethodPost, "/api/rooms/create", strings.NewReader(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handleCreateRoom(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("createTestRoom failed for room %s: %d %s", roomID, rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		RoomID    string `json:"roomId"`
+		AdminKey  string `json:"adminKey"`
+		ClientKey string `json:"clientKey"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("createTestRoom json decode failed: %v", err)
+	}
+	return resp.AdminKey, resp.ClientKey
+}
+
+func TestWebSocket_AdminAuth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(handleWebSocket))
+	defer server.Close()
+
+	wsBaseURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	roomID := fmt.Sprintf("test-admin-auth-%d", time.Now().UnixNano())
+	adminKey, _ := createTestRoom(t, roomID)
+	t.Cleanup(func() {
+		hub.mu.Lock()
+		delete(hub.rooms, roomID)
+		hub.mu.Unlock()
+	})
+
+	t.Run("NoKey", func(t *testing.T) {
+		url := fmt.Sprintf("%s/ws?roomId=%s&role=admin", wsBaseURL, roomID)
+		conn, resp, err := websocket.DefaultDialer.Dial(url, nil)
+		if conn != nil {
+			conn.Close()
+		}
+		if err == nil {
+			t.Fatal("expected error connecting without key, got nil")
+		}
+		if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected status 401 Unauthorized, got %v", resp)
+		}
+	})
+
+	t.Run("WrongKey", func(t *testing.T) {
+		url := fmt.Sprintf("%s/ws?roomId=%s&role=admin&key=wrong-key", wsBaseURL, roomID)
+		conn, resp, err := websocket.DefaultDialer.Dial(url, nil)
+		if conn != nil {
+			conn.Close()
+		}
+		if err == nil {
+			t.Fatal("expected error connecting with wrong key, got nil")
+		}
+		if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected status 401 Unauthorized, got %v", resp)
+		}
+	})
+
+	t.Run("CorrectKey", func(t *testing.T) {
+		url := fmt.Sprintf("%s/ws?roomId=%s&role=admin&key=%s", wsBaseURL, roomID, adminKey)
+		conn, resp, err := websocket.DefaultDialer.Dial(url, nil)
+		if err != nil {
+			t.Fatalf("expected successful connection with correct key, got err: %v", err)
+		}
+		defer conn.Close()
+		if resp == nil || resp.StatusCode != http.StatusSwitchingProtocols {
+			t.Fatalf("expected status 101 Switching Protocols, got %v", resp)
+		}
+	})
+}
+
+func TestWebSocket_ClientAuth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(handleWebSocket))
+	defer server.Close()
+
+	wsBaseURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	roomID := fmt.Sprintf("test-client-auth-%d", time.Now().UnixNano())
+	_, clientKey := createTestRoom(t, roomID)
+	t.Cleanup(func() {
+		hub.mu.Lock()
+		delete(hub.rooms, roomID)
+		hub.mu.Unlock()
+	})
+
+	t.Run("NoKey", func(t *testing.T) {
+		url := fmt.Sprintf("%s/ws?roomId=%s&role=client", wsBaseURL, roomID)
+		conn, resp, err := websocket.DefaultDialer.Dial(url, nil)
+		if conn != nil {
+			conn.Close()
+		}
+		if err == nil {
+			t.Fatal("expected error connecting without key, got nil")
+		}
+		if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected status 401 Unauthorized, got %v", resp)
+		}
+	})
+
+	t.Run("WrongKey", func(t *testing.T) {
+		url := fmt.Sprintf("%s/ws?roomId=%s&role=client&key=000000", wsBaseURL, roomID)
+		conn, resp, err := websocket.DefaultDialer.Dial(url, nil)
+		if conn != nil {
+			conn.Close()
+		}
+		if err == nil {
+			t.Fatal("expected error connecting with wrong key, got nil")
+		}
+		if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected status 401 Unauthorized, got %v", resp)
+		}
+	})
+
+	t.Run("NonExistentRoom", func(t *testing.T) {
+		nonExistentRoomID := fmt.Sprintf("non-existent-%d", time.Now().UnixNano())
+		url := fmt.Sprintf("%s/ws?roomId=%s&role=client&key=%s", wsBaseURL, nonExistentRoomID, clientKey)
+		conn, resp, err := websocket.DefaultDialer.Dial(url, nil)
+		if conn != nil {
+			conn.Close()
+		}
+		if err == nil {
+			t.Fatal("expected error connecting to non-existent room, got nil")
+		}
+		if resp == nil || resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected status 404 Not Found, got %v", resp)
+		}
+	})
+
+	t.Run("CorrectKey", func(t *testing.T) {
+		url := fmt.Sprintf("%s/ws?roomId=%s&role=client&key=%s", wsBaseURL, roomID, clientKey)
+		conn, resp, err := websocket.DefaultDialer.Dial(url, nil)
+		if err != nil {
+			t.Fatalf("expected successful connection with correct key, got err: %v", err)
+		}
+		defer conn.Close()
+		if resp == nil || resp.StatusCode != http.StatusSwitchingProtocols {
+			t.Fatalf("expected status 101 Switching Protocols, got %v", resp)
+		}
+	})
+}
+
+func TestWebSocket_AdminReceivesClientKeyInInit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(handleWebSocket))
+	defer server.Close()
+
+	wsBaseURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	roomID := fmt.Sprintf("test-admin-clientkey-%d", time.Now().UnixNano())
+	adminKey, expectedClientKey := createTestRoom(t, roomID)
+	t.Cleanup(func() {
+		hub.mu.Lock()
+		delete(hub.rooms, roomID)
+		hub.mu.Unlock()
+	})
+
+	url := fmt.Sprintf("%s/ws?roomId=%s&role=admin&key=%s", wsBaseURL, roomID, adminKey)
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatalf("failed to connect admin: %v", err)
+	}
+	defer conn.Close()
+
+	var initMsg struct {
+		Type      string    `json:"type"`
+		Payload   RoomState `json:"payload"`
+		ClientKey string    `json:"clientKey"`
+	}
+	if err := conn.ReadJSON(&initMsg); err != nil {
+		t.Fatalf("failed to read init message: %v", err)
+	}
+	if initMsg.Type != "init" {
+		t.Fatalf("expected init msg type 'init', got %q", initMsg.Type)
+	}
+	if initMsg.ClientKey != expectedClientKey {
+		t.Fatalf("expected initMsg.ClientKey to be %q, got %q", expectedClientKey, initMsg.ClientKey)
+	}
+	matched, err := regexp.MatchString(`^[0-9]{6}$`, initMsg.ClientKey)
+	if err != nil || !matched {
+		t.Fatalf("expected initMsg.ClientKey to be 6 digits, got %q", initMsg.ClientKey)
+	}
+}
+
 func TestWebSocket_RoleAuthorization(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(handleWebSocket))
 	defer server.Close()
 
 	roomID := fmt.Sprintf("test-room-auth-%d", time.Now().UnixNano())
+	adminKey, clientKey := createTestRoom(t, roomID)
+	t.Cleanup(func() {
+		hub.mu.Lock()
+		delete(hub.rooms, roomID)
+		hub.mu.Unlock()
+	})
 	wsBaseURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
 	// Connect Admin
-	adminURL := fmt.Sprintf("%s/ws?roomId=%s&role=admin", wsBaseURL, roomID)
+	adminURL := fmt.Sprintf("%s/ws?roomId=%s&role=admin&key=%s", wsBaseURL, roomID, adminKey)
 	adminConn, _, err := websocket.DefaultDialer.Dial(adminURL, nil)
 	if err != nil {
 		t.Fatalf("failed to connect admin: %v", err)
@@ -364,7 +554,7 @@ func TestWebSocket_RoleAuthorization(t *testing.T) {
 	}
 
 	// Connect Client
-	clientURL := fmt.Sprintf("%s/ws?roomId=%s&role=client", wsBaseURL, roomID)
+	clientURL := fmt.Sprintf("%s/ws?roomId=%s&role=client&key=%s", wsBaseURL, roomID, clientKey)
 	clientConn, _, err := websocket.DefaultDialer.Dial(clientURL, nil)
 	if err != nil {
 		t.Fatalf("failed to connect client: %v", err)
@@ -563,12 +753,18 @@ func TestConcurrentBroadcast(t *testing.T) {
 
 	wsBaseURL := "ws" + strings.TrimPrefix(server.URL, "http")
 	roomID := fmt.Sprintf("test-room-bcast-%d", time.Now().UnixNano())
+	adminKey, clientKey := createTestRoom(t, roomID)
+	t.Cleanup(func() {
+		hub.mu.Lock()
+		delete(hub.rooms, roomID)
+		hub.mu.Unlock()
+	})
 
 	// Baseline goroutine count before dialing connections
 	baselineGoroutines := runtime.NumGoroutine()
 
 	// Connect Admin
-	adminURL := fmt.Sprintf("%s/ws?roomId=%s&role=admin", wsBaseURL, roomID)
+	adminURL := fmt.Sprintf("%s/ws?roomId=%s&role=admin&key=%s", wsBaseURL, roomID, adminKey)
 	adminConn, _, err := websocket.DefaultDialer.Dial(adminURL, nil)
 	if err != nil {
 		t.Fatalf("failed to connect admin: %v", err)
@@ -586,7 +782,7 @@ func TestConcurrentBroadcast(t *testing.T) {
 
 	clients := make([]*websocket.Conn, numClients)
 	for i := 0; i < numClients; i++ {
-		clientURL := fmt.Sprintf("%s/ws?roomId=%s&role=client", wsBaseURL, roomID)
+		clientURL := fmt.Sprintf("%s/ws?roomId=%s&role=client&key=%s", wsBaseURL, roomID, clientKey)
 		conn, _, err := websocket.DefaultDialer.Dial(clientURL, nil)
 		if err != nil {
 			t.Fatalf("client %d failed to connect: %v", i, err)
@@ -694,6 +890,12 @@ func TestRoomPruningRace(t *testing.T) {
 
 	wsBaseURL := "ws" + strings.TrimPrefix(server.URL, "http")
 	roomID := fmt.Sprintf("test-room-prune-%d", time.Now().UnixNano())
+	adminKey, clientKey := createTestRoom(t, roomID)
+	t.Cleanup(func() {
+		hub.mu.Lock()
+		delete(hub.rooms, roomID)
+		hub.mu.Unlock()
+	})
 
 	const numFlapping = 30
 	const numPersistent = 10
@@ -701,12 +903,26 @@ func TestRoomPruningRace(t *testing.T) {
 	var wg sync.WaitGroup
 	persistentConns := make([]*websocket.Conn, numPersistent)
 
-	// Concurrently run flapping clients and persistent clients
+	// Connect persistent clients first to keep room alive
+	for i := 0; i < numPersistent; i++ {
+		url := fmt.Sprintf("%s/ws?roomId=%s&role=client&key=%s", wsBaseURL, roomID, clientKey)
+		conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+		if err != nil {
+			t.Fatalf("persistent client %d dial failed: %v", i, err)
+		}
+		var initMsg WSMessage
+		if err := conn.ReadJSON(&initMsg); err != nil {
+			t.Fatalf("persistent client %d read init failed: %v", i, err)
+		}
+		persistentConns[i] = conn
+	}
+
+	// Concurrently run flapping clients
 	for i := 0; i < numFlapping; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			url := fmt.Sprintf("%s/ws?roomId=%s&role=client", wsBaseURL, roomID)
+			url := fmt.Sprintf("%s/ws?roomId=%s&role=client&key=%s", wsBaseURL, roomID, clientKey)
 			conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 			if err != nil {
 				t.Errorf("flapping client %d dial failed: %v", id, err)
@@ -716,26 +932,6 @@ func TestRoomPruningRace(t *testing.T) {
 			_ = conn.ReadJSON(&initMsg)
 			time.Sleep(time.Duration(id%5) * time.Millisecond)
 			_ = conn.Close()
-		}(i)
-	}
-
-	for i := 0; i < numPersistent; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			url := fmt.Sprintf("%s/ws?roomId=%s&role=client", wsBaseURL, roomID)
-			conn, _, err := websocket.DefaultDialer.Dial(url, nil)
-			if err != nil {
-				t.Errorf("persistent client %d dial failed: %v", id, err)
-				return
-			}
-			var initMsg WSMessage
-			if err := conn.ReadJSON(&initMsg); err != nil {
-				t.Errorf("persistent client %d read init failed: %v", id, err)
-				_ = conn.Close()
-				return
-			}
-			persistentConns[id] = conn
 		}(i)
 	}
 
@@ -770,7 +966,7 @@ func TestRoomPruningRace(t *testing.T) {
 	}
 
 	// Connect admin and broadcast an update; all persistent clients must receive it
-	adminURL := fmt.Sprintf("%s/ws?roomId=%s&role=admin", wsBaseURL, roomID)
+	adminURL := fmt.Sprintf("%s/ws?roomId=%s&role=admin&key=%s", wsBaseURL, roomID, adminKey)
 	adminConn, _, err := websocket.DefaultDialer.Dial(adminURL, nil)
 	if err != nil {
 		t.Fatalf("admin dial failed: %v", err)
