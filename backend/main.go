@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -12,6 +11,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"math/big"
 	"net/http"
 	"os"
 	"os/signal"
@@ -104,15 +104,36 @@ type Room struct {
 
 func generateAdminKey() string {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
 	return "adm_" + hex.EncodeToString(b)
 }
 
 func generateClientKey() string {
-	var n uint32
-	_ = binary.Read(rand.Reader, binary.BigEndian, &n)
-	code := 100000 + (n % 900000)
-	return fmt.Sprintf("%06d", code)
+	n, err := rand.Int(rand.Reader, big.NewInt(900000))
+	if err != nil {
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
+	return fmt.Sprintf("%06d", 100000+n.Int64())
+}
+
+func newRoom(roomID string) *Room {
+	return &Room{
+		ID:        roomID,
+		AdminKey:  generateAdminKey(),
+		ClientKey: generateClientKey(),
+		State: RoomState{
+			RoomID:      roomID,
+			ImgURL:      "",
+			X:           0.0,
+			Y:           0.0,
+			Scale:       1.0,
+			Layout:      "1",
+			AspectRatio: "16:9",
+		},
+		Clients: make(map[*SafeConn]string),
+	}
 }
 
 func sanitizeRoomID(id string) string {
@@ -155,21 +176,7 @@ func (h *Hub) getOrCreateRoom(roomID string) *Room {
 
 	room, exists := h.rooms[roomID]
 	if !exists {
-		room = &Room{
-			ID:        roomID,
-			AdminKey:  generateAdminKey(),
-			ClientKey: generateClientKey(),
-			State: RoomState{
-				RoomID:      roomID,
-				ImgURL:      "",
-				X:           0.0,
-				Y:           0.0,
-				Scale:       1.0,
-				Layout:      "1",
-				AspectRatio: "16:9",
-			},
-			Clients: make(map[*SafeConn]string),
-		}
+		room = newRoom(roomID)
 		h.rooms[roomID] = room
 		log.Printf("Created new room: %s", roomID)
 	}
@@ -501,6 +508,7 @@ func handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		ClientKey string `json:"clientKey"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("Error parsing request: %v", err), http.StatusBadRequest)
@@ -514,46 +522,27 @@ func handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hub.mu.Lock()
-	defer hub.mu.Unlock()
-
 	room, exists := hub.rooms[roomID]
 	if exists {
-		if req.AdminKey != "" && subtle.ConstantTimeCompare([]byte(req.AdminKey), []byte(room.AdminKey)) == 1 {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(createResp{
-				RoomID:    room.ID,
-				AdminKey:  room.AdminKey,
-				ClientKey: room.ClientKey,
-			})
+		if req.AdminKey == "" || subtle.ConstantTimeCompare([]byte(req.AdminKey), []byte(room.AdminKey)) != 1 {
+			hub.mu.Unlock()
+			http.Error(w, "Room already claimed by another admin", http.StatusForbidden)
 			return
 		}
-		http.Error(w, "Room already claimed by another admin", http.StatusForbidden)
-		return
+	} else {
+		room = newRoom(roomID)
+		hub.rooms[roomID] = room
 	}
 
-	room = &Room{
-		ID:        roomID,
-		AdminKey:  generateAdminKey(),
-		ClientKey: generateClientKey(),
-		State: RoomState{
-			RoomID:      roomID,
-			ImgURL:      "",
-			X:           0.0,
-			Y:           0.0,
-			Scale:       1.0,
-			Layout:      "1",
-			AspectRatio: "16:9",
-		},
-		Clients: make(map[*SafeConn]string),
-	}
-	hub.rooms[roomID] = room
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(createResp{
+	resp := createResp{
 		RoomID:    room.ID,
 		AdminKey:  room.AdminKey,
 		ClientKey: room.ClientKey,
-	})
+	}
+	hub.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // API endpoint to list active rooms
