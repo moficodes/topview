@@ -12,6 +12,7 @@ interface InteractiveCanvasProps {
   y: number;
   scale: number;
   onChange?: (state: CanvasState) => void;
+  onDragEnd?: () => void;
   isReadOnly?: boolean;
 }
 
@@ -21,12 +22,31 @@ export const InteractiveCanvas: React.FC<InteractiveCanvasProps> = ({
   y,
   scale,
   onChange,
+  onDragEnd,
   isReadOnly = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [imgError, setImgError] = useState(false);
+  const [prevImgUrl, setPrevImgUrl] = useState(imgUrl);
+  if (imgUrl !== prevImgUrl) {
+    setPrevImgUrl(imgUrl);
+    setImgError(false);
+  }
+
   const dragStart = useRef({ x: 0, y: 0 });
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+
+  // Active pointers map (pointerId -> { x, y })
+  const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchStartDistanceRef = useRef<number | null>(null);
+  const pinchStartScaleRef = useRef<number>(1);
+
+  // Keep latest props in a ref for callbacks
+  const propsRef = useRef({ x, y, scale });
+  useEffect(() => {
+    propsRef.current = { x, y, scale };
+  }, [x, y, scale]);
 
   // Update container size on mount and resize
   useEffect(() => {
@@ -54,70 +74,120 @@ export const InteractiveCanvas: React.FC<InteractiveCanvasProps> = ({
     };
   }, []);
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isReadOnly || !onChange) return;
-    setIsDragging(true);
-    dragStart.current = {
-      x: e.clientX - x * containerSize.width,
-      y: e.clientY - y * containerSize.height,
-    };
-    e.preventDefault();
+    // Only drag on primary button for mouse
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore if setPointerCapture is unsupported
+    }
+
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointersRef.current.size === 1) {
+      setIsDragging(true);
+      dragStart.current = {
+        x: e.clientX - propsRef.current.x * containerSize.width,
+        y: e.clientY - propsRef.current.y * containerSize.height,
+      };
+    } else if (pointersRef.current.size === 2) {
+      const points = Array.from(pointersRef.current.values());
+      const dist = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+      pinchStartDistanceRef.current = dist > 0 ? dist : 1;
+      pinchStartScaleRef.current = propsRef.current.scale;
+    }
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!isDragging || isReadOnly || !onChange || containerSize.width === 0) return;
-    
-    // Calculate new normalized translation
-    const dx = e.clientX - dragStart.current.x;
-    const dy = e.clientY - dragStart.current.y;
-    
-    onChange({
-      x: dx / containerSize.width,
-      y: dy / containerSize.height,
-      scale,
-    });
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isReadOnly || !onChange || containerSize.width === 0 || containerSize.height === 0) return;
+    if (!pointersRef.current.has(e.pointerId)) return;
+
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointersRef.current.size === 1) {
+      // Single pointer: Pan (drag)
+      const dx = e.clientX - dragStart.current.x;
+      const dy = e.clientY - dragStart.current.y;
+
+      onChange({
+        x: dx / containerSize.width,
+        y: dy / containerSize.height,
+        scale: propsRef.current.scale,
+      });
+    } else if (pointersRef.current.size === 2) {
+      // Two pointers: Pinch-to-zoom
+      const points = Array.from(pointersRef.current.values());
+      const p1 = points[0];
+      const p2 = points[1];
+      const currentDistance = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+
+      if (pinchStartDistanceRef.current && pinchStartDistanceRef.current > 0) {
+        const factor = currentDistance / pinchStartDistanceRef.current;
+        const newScale = Math.max(0.1, Math.min(15.0, pinchStartScaleRef.current * factor));
+        onChange({
+          x: propsRef.current.x,
+          y: propsRef.current.y,
+          scale: newScale,
+        });
+      }
+    }
   };
 
-  const handleMouseUpOrLeave = () => {
-    setIsDragging(false);
+  const handlePointerUpOrCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // Ignore
+    }
+
+    pointersRef.current.delete(e.pointerId);
+
+    if (pointersRef.current.size === 1) {
+      // Seamless transition back to single pointer drag
+      const [remaining] = Array.from(pointersRef.current.values());
+      dragStart.current = {
+        x: remaining.x - propsRef.current.x * containerSize.width,
+        y: remaining.y - propsRef.current.y * containerSize.height,
+      };
+      pinchStartDistanceRef.current = null;
+    } else if (pointersRef.current.size === 0) {
+      setIsDragging(false);
+      pinchStartDistanceRef.current = null;
+      if (onDragEnd) {
+        onDragEnd();
+      }
+    }
+  };
+
+  const handleLostPointerCapture = (e: React.PointerEvent<HTMLDivElement>) => {
+    pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size === 0) {
+      setIsDragging(false);
+      pinchStartDistanceRef.current = null;
+      if (onDragEnd) {
+        onDragEnd();
+      }
+    }
   };
 
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     if (isReadOnly || !onChange) return;
     e.preventDefault();
-    
+
     const zoomFactor = 0.05;
     const direction = e.deltaY < 0 ? 1 : -1;
-    const newScale = Math.max(0.1, Math.min(15, scale + direction * zoomFactor * scale));
-    
+    const currentScale = propsRef.current.scale;
+    const newScale = Math.max(0.1, Math.min(15.0, currentScale + direction * zoomFactor * currentScale));
+
     onChange({
-      x,
-      y,
+      x: propsRef.current.x,
+      y: propsRef.current.y,
       scale: newScale,
-    });
-  };
-
-  // Touch support for mobile admin control
-  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (isReadOnly || !onChange || e.touches.length !== 1) return;
-    setIsDragging(true);
-    const touch = e.touches[0];
-    dragStart.current = {
-      x: touch.clientX - x * containerSize.width,
-      y: touch.clientY - y * containerSize.height,
-    };
-  };
-
-  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (!isDragging || isReadOnly || !onChange || containerSize.width === 0 || e.touches.length !== 1) return;
-    const touch = e.touches[0];
-    const dx = touch.clientX - dragStart.current.x;
-    const dy = touch.clientY - dragStart.current.y;
-    
-    onChange({
-      x: dx / containerSize.width,
-      y: dy / containerSize.height,
-      scale,
     });
   };
 
@@ -128,30 +198,49 @@ export const InteractiveCanvas: React.FC<InteractiveCanvasProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full overflow-hidden bg-[#1e2029] border border-gray-800 rounded-xl flex items-center justify-center select-none ${
+      className={`relative w-full h-full overflow-hidden bg-[#1e2029] border border-gray-800 rounded-xl flex items-center justify-center select-none touch-none ${
         isReadOnly ? "" : isDragging ? "cursor-grabbing" : "cursor-grab"
       }`}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUpOrLeave}
-      onMouseLeave={handleMouseUpOrLeave}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUpOrCancel}
+      onPointerCancel={handlePointerUpOrCancel}
+      onLostPointerCapture={handleLostPointerCapture}
       onWheel={handleWheel}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleMouseUpOrLeave}
     >
       {/* Background Grid Pattern */}
       <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:16px_16px] pointer-events-none" />
 
-      {imgUrl ? (
+      {imgUrl && !imgError ? (
         <img
-          src={imgUrl.startsWith("http") || imgUrl.startsWith("/") ? imgUrl : imgUrl}
+          src={imgUrl}
           alt="Room Content"
+          onError={() => setImgError(true)}
           className="max-w-[80%] max-h-[80%] object-contain pointer-events-none transition-transform duration-75 ease-out"
           style={{
             transform: `translate(${pxX}px, ${pxY}px) scale(${scale})`,
           }}
         />
+      ) : imgError ? (
+        <div className="text-gray-400 text-center flex flex-col items-center gap-2 pointer-events-none p-4">
+          <svg
+            className="w-12 h-12 text-red-400/80 mb-1"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.5}
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+            />
+          </svg>
+          <span className="text-sm font-medium text-red-300">Failed to load image</span>
+          <span className="text-[11px] text-gray-500 max-w-xs truncate font-mono">
+            {imgUrl}
+          </span>
+        </div>
       ) : (
         <div className="text-gray-500 text-center flex flex-col items-center gap-2 pointer-events-none">
           <svg
@@ -172,7 +261,7 @@ export const InteractiveCanvas: React.FC<InteractiveCanvasProps> = ({
       )}
 
       {/* Info indicator for admins */}
-      {!isReadOnly && imgUrl && (
+      {!isReadOnly && imgUrl && !imgError && (
         <div className="absolute bottom-3 right-3 bg-black/70 backdrop-blur-sm text-xs text-gray-400 py-1 px-2.5 rounded-full pointer-events-none flex gap-2">
           <span>Scale: {scale.toFixed(2)}x</span>
           <span className="border-l border-gray-700 pl-2">

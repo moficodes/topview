@@ -34,6 +34,9 @@ export const RoomClient: React.FC = () => {
   const [workspaceSize, setWorkspaceSize] = useState({ width: 0, height: 0 });
 
   const wsRef = useRef<WebSocket | null>(null);
+  const [reconnectTrigger, setReconnectTrigger] = useState(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
 
   // ResizeObserver to dynamically measure exact container boundaries
   useEffect(() => {
@@ -61,9 +64,15 @@ export const RoomClient: React.FC = () => {
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, []);
 
-  // WebSocket Connection
+  // WebSocket Connection with automatic reconnection and backoff
   useEffect(() => {
     if (!roomId) return;
+    let isUnmounted = false;
+
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
@@ -74,8 +83,17 @@ export const RoomClient: React.FC = () => {
     wsRef.current = ws;
 
     ws.onopen = () => {
+      if (isUnmounted) {
+        ws.close();
+        return;
+      }
       setWsConnected(true);
       setErrorMsg("");
+      reconnectAttemptsRef.current = 0;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       console.log(`[Client:${roomId}] WebSocket connected successfully`);
     };
 
@@ -97,27 +115,37 @@ export const RoomClient: React.FC = () => {
 
     ws.onclose = (event) => {
       setWsConnected(false);
+      if (isUnmounted) return;
       console.log(`[Client:${roomId}] WebSocket disconnected:`, event);
-      
-      // Auto reconnect loop
-      const timer = setTimeout(() => {
-        if (wsRef.current === ws) {
-          setState((prev) => ({ ...prev }));
-        }
-      }, 4000);
 
-      return () => clearTimeout(timer);
+      // Exponential backoff: 1s, 2s, 4s, 8s, up to 10s max
+      const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000);
+      reconnectAttemptsRef.current += 1;
+
+      reconnectTimerRef.current = setTimeout(() => {
+        if (!isUnmounted) {
+          setReconnectTrigger((prev) => prev + 1);
+        }
+      }, delay);
     };
 
     ws.onerror = (err) => {
       console.error(`[Client:${roomId}] WebSocket error:`, err);
-      setErrorMsg("WebSocket connection error. Please refresh or check server status.");
+      if (reconnectAttemptsRef.current >= 2) {
+        setErrorMsg("WebSocket connection error. Reconnecting...");
+      }
     };
 
     return () => {
+      isUnmounted = true;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      ws.onclose = null;
       ws.close();
     };
-  }, [roomId]);
+  }, [roomId, reconnectTrigger]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
