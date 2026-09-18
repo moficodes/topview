@@ -12,6 +12,8 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 
 interface RoomState {
@@ -52,6 +54,11 @@ export const Admin: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [imageUrlInput, setImageUrlInput] = useState("");
   const [aspectRatio, setAspectRatio] = useState("16:9");
+
+  const [openContent, setOpenContent] = useState(true);
+  const [openLayout, setOpenLayout] = useState(false);
+  const [openAspectRatio, setOpenAspectRatio] = useState(false);
+  const [openControls, setOpenControls] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
@@ -436,260 +443,349 @@ export const Admin: React.FC = () => {
       {/* Main Workspace Grid */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
         {/* Left Control Column */}
-        <aside className="lg:col-span-4 bg-[#111219] border-r border-gray-900/80 p-5 space-y-6 overflow-y-auto max-h-screen">
-          {/* Content Upload */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-bold font-mono text-gray-500 tracking-wider uppercase">
-              1. Choose Content
-            </h3>
+        <aside className="lg:col-span-4 bg-[#111219] border-r border-gray-900/80 p-5 space-y-4 overflow-y-auto max-h-screen">
+          {/* Section 1: Content Upload */}
+          <div className="border border-gray-900/80 bg-gray-950/40 rounded-xl p-3">
+            <button
+              type="button"
+              onClick={() => setOpenContent((prev) => !prev)}
+              className="w-full flex items-center justify-between py-2 text-xs font-bold font-mono text-gray-400 hover:text-white transition-colors cursor-pointer text-left"
+            >
+              <div className="flex items-center gap-2">
+                {openContent ? (
+                  <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+                )}
+                <Upload className="w-4 h-4 text-purple-400 shrink-0" />
+                <span>1. Choose Content</span>
+              </div>
+              {!openContent && (
+                <span className="text-[10px] font-mono bg-purple-900/30 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded truncate max-w-[140px]">
+                  {imgUrl
+                    ? PRESET_IMAGES.find((p) => p.url === imgUrl)?.name || "Custom Image"
+                    : "None"}
+                </span>
+              )}
+            </button>
 
-            {/* Local file upload */}
-            <label className="flex flex-col items-center justify-center p-4 border border-dashed border-gray-800 rounded-xl hover:border-purple-500/50 hover:bg-purple-500/5 transition-all cursor-pointer group text-center">
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleImageUpload}
-                disabled={isUploading}
-                className="hidden"
-              />
-              <Upload className="w-6 h-6 text-gray-500 group-hover:text-purple-400 mb-2 transition-colors" />
-              <span className="text-xs font-medium text-gray-300">
-                {isUploading ? "Uploading file..." : "Upload local image"}
-              </span>
-              <span className="text-[10px] text-gray-500 font-mono mt-1">
-                PNG, JPG, WebP up to 20MB
-              </span>
-            </label>
+            {openContent && (
+              <div className="pt-3 border-t border-gray-900/60 mt-1 space-y-3">
+                {/* Local file upload */}
+                <label className="flex flex-col items-center justify-center p-4 border border-dashed border-gray-800 rounded-xl hover:border-purple-500/50 hover:bg-purple-500/5 transition-all cursor-pointer group text-center">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageUpload}
+                    disabled={isUploading}
+                    className="hidden"
+                  />
+                  <Upload className="w-6 h-6 text-gray-500 group-hover:text-purple-400 mb-2 transition-colors" />
+                  <span className="text-xs font-medium text-gray-300">
+                    {isUploading ? "Uploading file..." : "Upload local image"}
+                  </span>
+                  <span className="text-[10px] text-gray-500 font-mono mt-1">
+                    PNG, JPG, WebP up to 20MB
+                  </span>
+                </label>
 
-            {/* Paste URL */}
-            <form onSubmit={handleUrlInputSubmit} className="flex gap-1.5 pt-1">
-              <input
-                type="url"
-                placeholder="Paste remote image URL..."
-                value={imageUrlInput}
-                onChange={(e) => setImageUrlInput(e.target.value)}
-                className="flex-1 px-3 py-1.5 bg-gray-950 border border-gray-800 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-500 text-gray-300"
-              />
-              <button
-                type="submit"
-                className="px-2.5 py-1.5 bg-gray-900 border border-gray-800 hover:border-purple-500/50 hover:text-white rounded-lg text-xs transition-all font-semibold"
-              >
-                Load
-              </button>
-            </form>
-
-            {/* Preset Images */}
-            <div className="space-y-1.5 pt-1">
-              <span className="text-[10px] text-gray-500 font-mono">OR TRY SAMPLE PRESETS</span>
-              <div className="grid grid-cols-3 gap-1.5">
-                {PRESET_IMAGES.map((img) => (
+                {/* Paste URL */}
+                <form onSubmit={handleUrlInputSubmit} className="flex gap-1.5 pt-1">
+                  <input
+                    type="url"
+                    placeholder="Paste remote image URL..."
+                    value={imageUrlInput}
+                    onChange={(e) => setImageUrlInput(e.target.value)}
+                    className="flex-1 px-3 py-1.5 bg-gray-950 border border-gray-800 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-500 text-gray-300"
+                  />
                   <button
-                    key={img.name}
-                    onClick={() => handleImageSelect(img.url)}
-                    className={`p-1 border rounded-lg overflow-hidden h-14 relative group ${
-                      imgUrl === img.url
-                        ? "border-purple-500 bg-purple-500/10"
-                        : "border-gray-800 bg-gray-950 hover:border-gray-700"
+                    type="submit"
+                    className="px-2.5 py-1.5 bg-gray-900 border border-gray-800 hover:border-purple-500/50 hover:text-white rounded-lg text-xs transition-all font-semibold"
+                  >
+                    Load
+                  </button>
+                </form>
+
+                {/* Preset Images */}
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-[10px] text-gray-500 font-mono">OR TRY SAMPLE PRESETS</span>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {PRESET_IMAGES.map((img) => (
+                      <button
+                        key={img.name}
+                        onClick={() => handleImageSelect(img.url)}
+                        className={`p-1 border rounded-lg overflow-hidden h-14 relative group ${
+                          imgUrl === img.url
+                            ? "border-purple-500 bg-purple-500/10"
+                            : "border-gray-800 bg-gray-950 hover:border-gray-700"
+                        }`}
+                      >
+                        <img
+                          src={img.url}
+                          alt={img.name}
+                          className="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity"
+                        />
+                        <div className="absolute inset-x-0 bottom-0 bg-black/80 py-0.5 text-[8px] text-center text-gray-300 truncate">
+                          {img.name}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Section 2: Viewer Layout */}
+          <div className="border border-gray-900/80 bg-gray-950/40 rounded-xl p-3">
+            <button
+              type="button"
+              onClick={() => setOpenLayout((prev) => !prev)}
+              className="w-full flex items-center justify-between py-2 text-xs font-bold font-mono text-gray-400 hover:text-white transition-colors cursor-pointer text-left"
+            >
+              <div className="flex items-center gap-2">
+                {openLayout ? (
+                  <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+                )}
+                <Layout className="w-4 h-4 text-purple-400 shrink-0" />
+                <span>2. Viewer Layout</span>
+              </div>
+              {!openLayout && (
+                <span className="text-[10px] font-mono bg-purple-900/30 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded truncate max-w-[140px]">
+                  {getLayoutLabel(layout)}
+                </span>
+              )}
+            </button>
+
+            {openLayout && (
+              <div className="pt-3 border-t border-gray-900/60 mt-1 space-y-3">
+                <p className="text-[11px] text-gray-500">
+                  Configure how many copies are shown on the table client and their rotations so everyone can view it right side up.
+                </p>
+
+                <div className="grid grid-cols-2 gap-2">
+                  {/* Preset 1: Single Center */}
+                  <button
+                    onClick={() => handleLayoutChange("1")}
+                    className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
+                      layout === "1"
+                        ? "border-purple-500 bg-purple-500/10 text-white"
+                        : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
                     }`}
                   >
-                    <img
-                      src={img.url}
-                      alt={img.name}
-                      className="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity"
-                    />
-                    <div className="absolute inset-x-0 bottom-0 bg-black/80 py-0.5 text-[8px] text-center text-gray-300 truncate">
-                      {img.name}
+                    <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 flex items-center justify-center relative">
+                      <span className="w-4 h-4 rounded bg-purple-500 flex items-center justify-center text-[8px] text-white">0°</span>
                     </div>
+                    <div className="font-semibold text-xs">1 Copy</div>
+                    <div className="text-[9px] text-gray-500">Single center</div>
                   </button>
-                ))}
+
+                  {/* Preset 2: Top/Bottom */}
+                  <button
+                    onClick={() => handleLayoutChange("2-tb")}
+                    className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
+                      layout === "2-tb"
+                        ? "border-purple-500 bg-purple-500/10 text-white"
+                        : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
+                    }`}
+                  >
+                    <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 flex flex-col justify-between items-center p-1">
+                      <span className="w-4 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[7px] text-white rotate-180">0°</span>
+                      <span className="w-4 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[7px] text-white">0°</span>
+                    </div>
+                    <div className="font-semibold text-xs">2 Copies (T-B)</div>
+                    <div className="text-[9px] text-gray-500">Sitting opposite</div>
+                  </button>
+
+                  {/* Preset 3: Left/Right */}
+                  <button
+                    onClick={() => handleLayoutChange("2-lr")}
+                    className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
+                      layout === "2-lr"
+                        ? "border-purple-500 bg-purple-500/10 text-white"
+                        : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
+                    }`}
+                  >
+                    <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 flex justify-between items-center p-1">
+                      <span className="w-3.5 h-4 rounded bg-purple-500 flex items-center justify-center text-[7px] text-white rotate-90">0°</span>
+                      <span className="w-3.5 h-4 rounded bg-purple-500 flex items-center justify-center text-[7px] text-white -rotate-90">0°</span>
+                    </div>
+                    <div className="font-semibold text-xs">2 Copies (L-R)</div>
+                    <div className="text-[9px] text-gray-500">Sitting sides</div>
+                  </button>
+
+                  {/* Preset 4: Four Sided */}
+                  <button
+                    onClick={() => handleLayoutChange("4")}
+                    className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
+                      layout === "4"
+                        ? "border-purple-500 bg-purple-500/10 text-white"
+                        : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
+                    }`}
+                  >
+                    <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 grid grid-cols-2 gap-1 p-1">
+                      <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white rotate-180 m-auto">N</span>
+                      <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white -rotate-90 m-auto">E</span>
+                      <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white rotate-90 m-auto">W</span>
+                      <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white m-auto">S</span>
+                    </div>
+                    <div className="font-semibold text-xs">4 Copies</div>
+                    <div className="text-[9px] text-gray-500">Full table round</div>
+                  </button>
+
+                  {/* Preset 5: 3 Sided TRB */}
+                  <button
+                    onClick={() => handleLayoutChange("3-trb")}
+                    className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
+                      layout === "3-trb"
+                        ? "border-purple-500 bg-purple-500/10 text-white"
+                        : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
+                    }`}
+                  >
+                    <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 grid grid-cols-2 gap-1 p-1">
+                      <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white rotate-180 m-auto">N</span>
+                      <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white -rotate-90 m-auto">E</span>
+                      <span className="w-3.5 h-3.5 rounded bg-gray-800/40 m-auto opacity-20"></span>
+                      <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white m-auto">S</span>
+                    </div>
+                    <div className="font-semibold text-xs">3 Copies (TRB)</div>
+                    <div className="text-[9px] text-gray-500">No West seat</div>
+                  </button>
+
+                  {/* Preset 6: 3 Sided TLB */}
+                  <button
+                    onClick={() => handleLayoutChange("3-tlb")}
+                    className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
+                      layout === "3-tlb"
+                        ? "border-purple-500 bg-purple-500/10 text-white"
+                        : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
+                    }`}
+                  >
+                    <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 grid grid-cols-2 gap-1 p-1">
+                      <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white rotate-180 m-auto">N</span>
+                      <span className="w-3.5 h-3.5 rounded bg-gray-800/40 m-auto opacity-20"></span>
+                      <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white rotate-90 m-auto">W</span>
+                      <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white m-auto">S</span>
+                    </div>
+                    <div className="font-semibold text-xs">3 Copies (TLB)</div>
+                    <div className="text-[9px] text-gray-500">No East seat</div>
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
-          {/* Layout Orientation */}
-          <div className="space-y-3 pt-3 border-t border-gray-950">
-            <h3 className="text-xs font-bold font-mono text-gray-500 tracking-wider uppercase flex items-center gap-1.5">
-              <Layout className="w-4 h-4 text-purple-400" /> 2. Viewer Layout
-            </h3>
-            <p className="text-[11px] text-gray-500">
-              Configure how many copies are shown on the table client and their rotations so everyone can view it right side up.
-            </p>
+          {/* Section 3: Aspect Ratio Selection */}
+          <div className="border border-gray-900/80 bg-gray-950/40 rounded-xl p-3">
+            <button
+              type="button"
+              onClick={() => setOpenAspectRatio((prev) => !prev)}
+              className="w-full flex items-center justify-between py-2 text-xs font-bold font-mono text-gray-400 hover:text-white transition-colors cursor-pointer text-left"
+            >
+              <div className="flex items-center gap-2">
+                {openAspectRatio ? (
+                  <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+                )}
+                <Maximize2 className="w-4 h-4 text-purple-400 shrink-0" />
+                <span>Client Aspect Ratio</span>
+              </div>
+              {!openAspectRatio && (
+                <span className="text-[10px] font-mono bg-purple-900/30 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded truncate max-w-[140px]">
+                  {aspectRatio}
+                </span>
+              )}
+            </button>
 
-            <div className="grid grid-cols-2 gap-2">
-              {/* Preset 1: Single Center */}
-              <button
-                onClick={() => handleLayoutChange("1")}
-                className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
-                  layout === "1"
-                    ? "border-purple-500 bg-purple-500/10 text-white"
-                    : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
-                }`}
-              >
-                <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 flex items-center justify-center relative">
-                  <span className="w-4 h-4 rounded bg-purple-500 flex items-center justify-center text-[8px] text-white">0°</span>
+            {openAspectRatio && (
+              <div className="pt-3 border-t border-gray-900/60 mt-1 space-y-3">
+                <p className="text-[11px] text-gray-500">
+                  Set the proportion of the screen layout viewports for the connected clients.
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {["16:9", "16:10", "4:3", "1:1", "21:9"].map((ratio) => (
+                    <button
+                      key={ratio}
+                      onClick={() => {
+                        setAspectRatio(ratio);
+                        sendStateUpdate({ aspectRatio: ratio });
+                      }}
+                      className={`flex-1 px-2.5 py-1.5 border text-xs font-mono rounded-lg font-semibold transition-all ${
+                        aspectRatio === ratio
+                          ? "border-purple-500 bg-purple-500/10 text-white"
+                          : "border-gray-800 bg-gray-950 text-gray-400 hover:text-gray-200 hover:border-gray-700"
+                      }`}
+                    >
+                      {ratio}
+                    </button>
+                  ))}
                 </div>
-                <div className="font-semibold text-xs">1 Copy</div>
-                <div className="text-[9px] text-gray-500">Single center</div>
-              </button>
-
-              {/* Preset 2: Top/Bottom */}
-              <button
-                onClick={() => handleLayoutChange("2-tb")}
-                className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
-                  layout === "2-tb"
-                    ? "border-purple-500 bg-purple-500/10 text-white"
-                    : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
-                }`}
-              >
-                <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 flex flex-col justify-between items-center p-1">
-                  <span className="w-4 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[7px] text-white rotate-180">0°</span>
-                  <span className="w-4 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[7px] text-white">0°</span>
-                </div>
-                <div className="font-semibold text-xs">2 Copies (T-B)</div>
-                <div className="text-[9px] text-gray-500">Sitting opposite</div>
-              </button>
-
-              {/* Preset 3: Left/Right */}
-              <button
-                onClick={() => handleLayoutChange("2-lr")}
-                className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
-                  layout === "2-lr"
-                    ? "border-purple-500 bg-purple-500/10 text-white"
-                    : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
-                }`}
-              >
-                <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 flex justify-between items-center p-1">
-                  <span className="w-3.5 h-4 rounded bg-purple-500 flex items-center justify-center text-[7px] text-white rotate-90">0°</span>
-                  <span className="w-3.5 h-4 rounded bg-purple-500 flex items-center justify-center text-[7px] text-white -rotate-90">0°</span>
-                </div>
-                <div className="font-semibold text-xs">2 Copies (L-R)</div>
-                <div className="text-[9px] text-gray-500">Sitting sides</div>
-              </button>
-
-              {/* Preset 4: Four Sided */}
-              <button
-                onClick={() => handleLayoutChange("4")}
-                className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
-                  layout === "4"
-                    ? "border-purple-500 bg-purple-500/10 text-white"
-                    : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
-                }`}
-              >
-                <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 grid grid-cols-2 gap-1 p-1">
-                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white rotate-180 m-auto">N</span>
-                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white -rotate-90 m-auto">E</span>
-                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white rotate-90 m-auto">W</span>
-                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white m-auto">S</span>
-                </div>
-                <div className="font-semibold text-xs">4 Copies</div>
-                <div className="text-[9px] text-gray-500">Full table round</div>
-              </button>
-
-              {/* Preset 5: 3 Sided TRB */}
-              <button
-                onClick={() => handleLayoutChange("3-trb")}
-                className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
-                  layout === "3-trb"
-                    ? "border-purple-500 bg-purple-500/10 text-white"
-                    : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
-                }`}
-              >
-                <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 grid grid-cols-2 gap-1 p-1">
-                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white rotate-180 m-auto">N</span>
-                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white -rotate-90 m-auto">E</span>
-                  <span className="w-3.5 h-3.5 rounded bg-gray-800/40 m-auto opacity-20"></span>
-                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white m-auto">S</span>
-                </div>
-                <div className="font-semibold text-xs">3 Copies (TRB)</div>
-                <div className="text-[9px] text-gray-500">No West seat</div>
-              </button>
-
-              {/* Preset 6: 3 Sided TLB */}
-              <button
-                onClick={() => handleLayoutChange("3-tlb")}
-                className={`p-3 border rounded-xl flex flex-col items-center gap-2 text-center transition-all ${
-                  layout === "3-tlb"
-                    ? "border-purple-500 bg-purple-500/10 text-white"
-                    : "border-gray-800 bg-gray-950 hover:border-gray-700 text-gray-400 hover:text-gray-200"
-                }`}
-              >
-                <div className="w-10 h-10 border border-gray-700 rounded bg-gray-900/60 grid grid-cols-2 gap-1 p-1">
-                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white rotate-180 m-auto">N</span>
-                  <span className="w-3.5 h-3.5 rounded bg-gray-800/40 m-auto opacity-20"></span>
-                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white rotate-90 m-auto">W</span>
-                  <span className="w-3.5 h-3.5 rounded bg-purple-500 flex items-center justify-center text-[6px] text-white m-auto">S</span>
-                </div>
-                <div className="font-semibold text-xs">3 Copies (TLB)</div>
-                <div className="text-[9px] text-gray-500">No East seat</div>
-              </button>
-            </div>
+              </div>
+            )}
           </div>
 
-          {/* Aspect Ratio Selection */}
-          <div className="space-y-3 pt-3 border-t border-gray-950">
-            <h3 className="text-xs font-bold font-mono text-gray-500 tracking-wider uppercase flex items-center gap-1.5">
-              Client Aspect Ratio
-            </h3>
-            <p className="text-[11px] text-gray-500">
-              Set the proportion of the screen layout viewports for the connected clients.
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {["16:9", "16:10", "4:3", "1:1", "21:9"].map((ratio) => (
-                <button
-                  key={ratio}
-                  onClick={() => {
-                    setAspectRatio(ratio);
-                    sendStateUpdate({ aspectRatio: ratio });
-                  }}
-                  className={`flex-1 px-2.5 py-1.5 border text-xs font-mono rounded-lg font-semibold transition-all ${
-                    aspectRatio === ratio
-                      ? "border-purple-500 bg-purple-500/10 text-white"
-                      : "border-gray-800 bg-gray-950 text-gray-400 hover:text-gray-200 hover:border-gray-700"
-                  }`}
-                >
-                  {ratio}
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* Section 4: Quick Controls */}
+          <div className="border border-gray-900/80 bg-gray-950/40 rounded-xl p-3">
+            <button
+              type="button"
+              onClick={() => setOpenControls((prev) => !prev)}
+              className="w-full flex items-center justify-between py-2 text-xs font-bold font-mono text-gray-400 hover:text-white transition-colors cursor-pointer text-left"
+            >
+              <div className="flex items-center gap-2">
+                {openControls ? (
+                  <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+                )}
+                <ZoomIn className="w-4 h-4 text-purple-400 shrink-0" />
+                <span>3. Viewport Controls</span>
+              </div>
+              {!openControls && (
+                <span className="text-[10px] font-mono bg-purple-900/30 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded truncate max-w-[140px]">
+                  {`${scale.toFixed(2)}x`}
+                </span>
+              )}
+            </button>
 
-          {/* Quick Controls */}
-          <div className="space-y-3 pt-3 border-t border-gray-950">
-            <h3 className="text-xs font-bold font-mono text-gray-500 tracking-wider uppercase">
-              3. Viewport Controls
-            </h3>
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleZoom(0.25)}
-                disabled={!imgUrl}
-                className="flex-1 py-2 bg-gray-950 hover:bg-gray-900 disabled:opacity-40 border border-gray-800 rounded-xl text-xs font-medium flex items-center justify-center gap-1"
-              >
-                <ZoomIn className="w-4 h-4" /> Zoom In
-              </button>
-              <button
-                onClick={() => handleZoom(-0.2) }
-                disabled={!imgUrl}
-                className="flex-1 py-2 bg-gray-950 hover:bg-gray-900 disabled:opacity-40 border border-gray-800 rounded-xl text-xs font-medium flex items-center justify-center gap-1"
-              >
-                <ZoomOut className="w-4 h-4" /> Zoom Out
-              </button>
-              <button
-                onClick={handleResetCanvas}
-                disabled={!imgUrl}
-                className="flex-1 py-2 bg-purple-900/20 hover:bg-purple-900/40 border border-purple-500/20 disabled:opacity-40 rounded-xl text-xs text-purple-400 font-semibold flex items-center justify-center gap-1"
-              >
-                <RotateCcw className="w-4 h-4" /> Reset
-              </button>
-            </div>
+            {openControls && (
+              <div className="pt-3 border-t border-gray-900/60 mt-1">
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleZoom(0.25)}
+                    disabled={!imgUrl}
+                    className="flex-1 py-2 bg-gray-950 hover:bg-gray-900 disabled:opacity-40 border border-gray-800 rounded-xl text-xs font-medium flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <ZoomIn className="w-4 h-4" /> Zoom In
+                  </button>
+                  <button
+                    onClick={() => handleZoom(-0.2)}
+                    disabled={!imgUrl}
+                    className="flex-1 py-2 bg-gray-950 hover:bg-gray-900 disabled:opacity-40 border border-gray-800 rounded-xl text-xs font-medium flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <ZoomOut className="w-4 h-4" /> Zoom Out
+                  </button>
+                  <button
+                    onClick={handleResetCanvas}
+                    disabled={!imgUrl}
+                    className="flex-1 py-2 bg-purple-900/20 hover:bg-purple-900/40 border border-purple-500/20 disabled:opacity-40 rounded-xl text-xs text-purple-400 font-semibold flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <RotateCcw className="w-4 h-4" /> Reset
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Mini Live Preview Block */}
-          <div className="space-y-3 pt-3 border-t border-gray-950">
-            <div className="flex justify-between items-center">
-              <h3 className="text-xs font-bold font-mono text-gray-500 tracking-wider uppercase">
+          <div className="border border-gray-900/80 bg-gray-950/40 rounded-xl p-3 space-y-3">
+            <div className="flex justify-between items-center py-2">
+              <h3 className="text-xs font-bold font-mono text-gray-400 tracking-wider uppercase">
                 Layout Preview
               </h3>
-              <span className="text-[9px] font-mono bg-purple-900/40 text-purple-400 border border-purple-800/30 px-1.5 py-0.5 rounded">
+              <span className="text-[10px] font-mono bg-purple-900/30 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded truncate max-w-[140px]">
                 {getLayoutLabel(layout)}
               </span>
             </div>
