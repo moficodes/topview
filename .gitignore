@@ -10,3 +10,5 @@ frontend/dist/
 *.local
 .worktrees
 .worktrees/
+.superpowers
+.superpowers/
