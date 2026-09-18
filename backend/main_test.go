@@ -70,22 +70,12 @@ func buildMultipartRequest(t *testing.T, fieldName, filename string, content []b
 	return req
 }
 
-func cleanupUploads(t *testing.T) {
-	t.Cleanup(func() {
-		entries, err := os.ReadDir("./uploads")
-		if err != nil {
-			return
-		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				_ = os.Remove(filepath.Join("./uploads", entry.Name()))
-			}
-		}
-	})
-}
-
 func TestHandleUpload_Validation(t *testing.T) {
-	cleanupUploads(t)
+	origUploadDir := uploadDir
+	uploadDir = t.TempDir()
+	t.Cleanup(func() {
+		uploadDir = origUploadDir
+	})
 
 	t.Run("RejectsEmptyRequest", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/upload", nil)
@@ -149,6 +139,7 @@ func TestHandleUpload_Validation(t *testing.T) {
 	t.Run("RejectsOversizedUpload", func(t *testing.T) {
 		// Send request exceeding 20MB using a streaming pipe
 		pr, pw := io.Pipe()
+		defer pr.Close()
 		writer := multipart.NewWriter(pw)
 
 		go func() {

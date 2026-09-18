@@ -138,7 +138,15 @@ func (h *Hub) removeConnection(roomID string, sc *SafeConn) {
 	}
 }
 
+var uploadDir = "./uploads"
+
 func validateRoomState(s *RoomState) {
+	if math.IsNaN(s.X) || math.IsInf(s.X, 0) {
+		s.X = 0.0
+	}
+	if math.IsNaN(s.Y) || math.IsInf(s.Y, 0) {
+		s.Y = 0.0
+	}
 	if math.IsNaN(s.Scale) || math.IsInf(s.Scale, 0) {
 		s.Scale = 1.0
 	} else if s.Scale < 0.1 {
@@ -372,7 +380,6 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uploadDir := "./uploads"
 	if err := os.MkdirAll(uploadDir, os.ModePerm); err != nil {
 		http.Error(w, "Failed to create uploads directory", http.StatusInternalServerError)
 		return
@@ -381,7 +388,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	filename := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
 	filePath := filepath.Join(uploadDir, filename)
 
-	targetFile, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0666)
+	targetFile, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
 		http.Error(w, "Failed to save file", http.StatusInternalServerError)
 		return
