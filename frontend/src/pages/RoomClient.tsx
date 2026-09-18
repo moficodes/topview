@@ -52,11 +52,11 @@ export const RoomClient: React.FC = () => {
   // Sync urlKey changes
   useEffect(() => {
     if (urlKey) {
+      hasEverConnectedRef.current = false;
       const timer = setTimeout(() => {
         setClientKey(urlKey);
         setNeedsPasscode(false);
         setAuthError("");
-        hasEverConnectedRef.current = false;
       }, 0);
       return () => clearTimeout(timer);
     }
@@ -299,13 +299,20 @@ export const RoomClient: React.FC = () => {
 
       {/* Passcode Dialog */}
       {needsPasscode && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="passcode-dialog-title"
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+        >
           <div className="bg-[#111219] border border-gray-800 p-6 md:p-8 rounded-2xl max-w-sm w-full shadow-2xl space-y-5 text-center">
             <div className="w-12 h-12 rounded-xl bg-purple-600/10 border border-purple-500/20 text-purple-400 flex items-center justify-center mx-auto">
               <KeyRound className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white tracking-tight">Enter Room Passcode</h2>
+              <h2 id="passcode-dialog-title" className="text-lg font-bold text-white tracking-tight">
+                Enter Room Passcode
+              </h2>
               <p className="text-xs text-gray-400 mt-1 font-mono">Room: <span className="text-purple-400 font-bold">{roomId}</span></p>
             </div>
             {authError && (
@@ -321,7 +328,7 @@ export const RoomClient: React.FC = () => {
                 maxLength={6}
                 autoFocus
                 value={passcodeInput}
-                onChange={(e) => setPasscodeInput(e.target.value)}
+                onChange={(e) => setPasscodeInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 placeholder="6-digit PIN (e.g. 482195)"
                 className="w-full text-center tracking-widest text-lg font-mono px-4 py-3 bg-gray-950 border border-gray-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 text-white placeholder-gray-600"
                 required
