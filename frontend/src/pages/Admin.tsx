@@ -448,6 +448,7 @@ export const Admin: React.FC = () => {
           <div className="border border-gray-900/80 bg-gray-950/40 rounded-xl p-3">
             <button
               type="button"
+              aria-expanded={openContent}
               onClick={() => setOpenContent((prev) => !prev)}
               className="w-full flex items-center justify-between py-2 text-xs font-bold font-mono text-gray-400 hover:text-white transition-colors cursor-pointer text-left"
             >
@@ -540,6 +541,7 @@ export const Admin: React.FC = () => {
           <div className="border border-gray-900/80 bg-gray-950/40 rounded-xl p-3">
             <button
               type="button"
+              aria-expanded={openLayout}
               onClick={() => setOpenLayout((prev) => !prev)}
               className="w-full flex items-center justify-between py-2 text-xs font-bold font-mono text-gray-400 hover:text-white transition-colors cursor-pointer text-left"
             >
@@ -681,6 +683,7 @@ export const Admin: React.FC = () => {
           <div className="border border-gray-900/80 bg-gray-950/40 rounded-xl p-3">
             <button
               type="button"
+              aria-expanded={openAspectRatio}
               onClick={() => setOpenAspectRatio((prev) => !prev)}
               className="w-full flex items-center justify-between py-2 text-xs font-bold font-mono text-gray-400 hover:text-white transition-colors cursor-pointer text-left"
             >
@@ -691,7 +694,7 @@ export const Admin: React.FC = () => {
                   <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
                 )}
                 <Maximize2 className="w-4 h-4 text-purple-400 shrink-0" />
-                <span>Client Aspect Ratio</span>
+                <span>3. Client Aspect Ratio</span>
               </div>
               {!openAspectRatio && (
                 <span className="text-[10px] font-mono bg-purple-900/30 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded truncate max-w-[140px]">
@@ -731,6 +734,7 @@ export const Admin: React.FC = () => {
           <div className="border border-gray-900/80 bg-gray-950/40 rounded-xl p-3">
             <button
               type="button"
+              aria-expanded={openControls}
               onClick={() => setOpenControls((prev) => !prev)}
               className="w-full flex items-center justify-between py-2 text-xs font-bold font-mono text-gray-400 hover:text-white transition-colors cursor-pointer text-left"
             >
@@ -741,7 +745,7 @@ export const Admin: React.FC = () => {
                   <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
                 )}
                 <ZoomIn className="w-4 h-4 text-purple-400 shrink-0" />
-                <span>3. Viewport Controls</span>
+                <span>4. Viewport Controls</span>
               </div>
               {!openControls && (
                 <span className="text-[10px] font-mono bg-purple-900/30 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded truncate max-w-[140px]">
