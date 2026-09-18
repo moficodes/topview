@@ -179,15 +179,9 @@ export const RoomClient: React.FC = () => {
       const slotH = workspaceSize.height;
       const invAspect = 1 / aspect;
       
-      let wVis = 0;
-      let hVis = 0;
-      if (slotW / slotH > invAspect) {
-        hVis = slotH;
-        wVis = slotH * invAspect;
-      } else {
-        wVis = slotW;
-        hVis = slotW / invAspect;
-      }
+      const { wVis, hVis } = slotW / slotH > invAspect
+        ? { wVis: slotH * invAspect, hVis: slotH }
+        : { wVis: slotW, hVis: slotW / invAspect };
       
       // Physical dimensions before rotation:
       viewW = hVis; // physical width (becomes visual height)

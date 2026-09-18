@@ -12,10 +12,10 @@ interface RoomInfo {
 export const Home: React.FC = () => {
   const [roomId, setRoomId] = useState("");
   const [activeRooms, setActiveRooms] = useState<RoomInfo[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
 
-  const fetchRooms = async () => {
+  const handleRefresh = async () => {
     setIsLoading(true);
     try {
       const res = await fetch("/api/rooms");
@@ -31,9 +31,26 @@ export const Home: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchRooms();
-    const interval = setInterval(fetchRooms, 5000); // refresh every 5s
-    return () => clearInterval(interval);
+    let mounted = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/rooms");
+        if (res.ok && mounted) {
+          const data = await res.json();
+          setActiveRooms(data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch rooms:", err);
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    };
+    load();
+    const interval = setInterval(load, 5000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
   const handleCreateRoom = (e: React.FormEvent) => {
@@ -159,7 +176,7 @@ export const Home: React.FC = () => {
                 Active Table Rooms
               </h4>
               <button
-                onClick={fetchRooms}
+                onClick={handleRefresh}
                 className="text-[10px] font-mono text-purple-400 hover:underline flex items-center gap-1"
                 disabled={isLoading}
               >

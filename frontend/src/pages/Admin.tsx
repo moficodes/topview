@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { InteractiveCanvas } from "../components/InteractiveCanvas";
 import {
@@ -53,6 +53,13 @@ export const Admin: React.FC = () => {
   const [aspectRatio, setAspectRatio] = useState("16:9");
 
   const wsRef = useRef<WebSocket | null>(null);
+
+  const log = useCallback(
+    (msg: string, details?: unknown) => {
+      console.log(`[Admin:${roomId}] ${msg}`, details || "");
+    },
+    [roomId]
+  );
 
   // Sync state over WebSocket whenever it changes
   const sendStateUpdate = (newState: Partial<RoomState>) => {
@@ -128,11 +135,7 @@ export const Admin: React.FC = () => {
     return () => {
       ws.close();
     };
-  }, [roomId]);
-
-  const log = (msg: string, details?: any) => {
-    console.log(`[Admin:${roomId}] ${msg}`, details || "");
-  };
+  }, [roomId, log]);
 
   const handleCanvasChange = (state: { x: number; y: number; scale: number }) => {
     setX(state.x);
@@ -270,15 +273,9 @@ export const Admin: React.FC = () => {
       const slotH = heightContainer;
       const invAspect = 1 / aspect;
       
-      let wVis = 0;
-      let hVis = 0;
-      if (slotW / slotH > invAspect) {
-        hVis = slotH;
-        wVis = slotH * invAspect;
-      } else {
-        wVis = slotW;
-        hVis = slotW / invAspect;
-      }
+      const { wVis, hVis } = slotW / slotH > invAspect
+        ? { wVis: slotH * invAspect, hVis: slotH }
+        : { wVis: slotW, hVis: slotW / invAspect };
       viewW = hVis; // physical width
       viewH = wVis; // physical height
     } else if (layoutType === "3-trb" || layoutType === "3-tlb") {
