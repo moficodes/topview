@@ -42,20 +42,18 @@ WORKDIR /app
 # Install security certificates & runtime packages
 RUN apk add --no-cache ca-certificates tzdata
 
-# Create an unprivileged non-root user and group
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+# Create an unprivileged non-root user and group with numeric UID/GID for strict container security
+RUN addgroup -g 10001 -S appgroup && adduser -u 10001 -S appuser -G appgroup
 
 # Create local folders for uploaded images with restrictive permissions
 RUN mkdir -p /app/uploads && chown -R appuser:appgroup /app/uploads && chmod 750 /app/uploads
 
-# Copy compiled Go server binary from Stage 2
-COPY --chown=appuser:appgroup --from=backend-builder /app/backend/server ./server
-
-# Copy compiled static frontend assets directly from Stage 1
-COPY --chown=appuser:appgroup --from=frontend-builder /app/frontend/dist ./dist
+# Copy compiled Go server binary and static assets (read-only for appuser)
+COPY --from=backend-builder /app/backend/server ./server
+COPY --from=frontend-builder /app/frontend/dist ./dist
 
 # Switch to unprivileged user
-USER appuser
+USER 10001:10001
 
 # Standard Cloud Run port setting (Cloud Run automatically injects its own PORT)
 ENV PORT=8080
