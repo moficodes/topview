@@ -14,6 +14,7 @@ import {
   RotateCcw,
   ChevronDown,
   ChevronRight,
+  Tv,
 } from "lucide-react";
 
 interface RoomState {
@@ -785,18 +786,24 @@ export const Admin: React.FC = () => {
 
           {/* Mini Live Preview Block */}
           <div className="border border-gray-900/80 bg-gray-950/40 rounded-xl p-3 space-y-3">
-            <div className="flex justify-between items-center py-2">
-              <h3 className="text-xs font-bold font-mono text-gray-400 tracking-wider uppercase">
-                Layout Preview
+            <div className="flex justify-between items-center py-2 gap-2">
+              <h3 className="text-xs font-bold font-mono text-gray-400 tracking-wider uppercase flex items-center gap-1.5">
+                <Tv className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                Live Tabletop Preview
               </h3>
-              <span className="text-[10px] font-mono bg-purple-900/30 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded truncate max-w-[140px]">
-                {getLayoutLabel(layout)}
-              </span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-[10px] font-mono bg-purple-900/30 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded truncate max-w-[140px]">
+                  {getLayoutLabel(layout)}
+                </span>
+                <span className="text-[10px] font-mono bg-purple-900/30 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded">
+                  {aspectRatio}
+                </span>
+              </div>
             </div>
 
             <div 
               ref={previewContainerRef}
-              className="w-full max-w-[220px] mx-auto bg-gray-950 rounded-xl border border-gray-900 overflow-hidden relative flex p-2 items-center justify-center transition-all"
+              className="w-full bg-gray-950 rounded-xl border border-gray-900 overflow-hidden relative flex p-2.5 items-center justify-center transition-all"
               style={{
                 aspectRatio: (aspectRatio || "16:9").replace(":", "/"),
               }}
