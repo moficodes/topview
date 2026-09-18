@@ -163,21 +163,57 @@ docker run -p 8080:8080 topview
 
 ### Google Cloud Run
 
-To deploy on Cloud Run with an always-on instance for long-lived WebSocket sessions:
+To deploy on Cloud Run with an always-on instance for uninterrupted, long-lived WebSocket sessions:
+
+#### 1. Configure Environment Variables
+Set your Google Cloud project ID, region, Artifact Registry repository name, and image tag:
 
 ```bash
-# 1. Build and push container image via Cloud Build
-gcloud builds submit --tag us-docker.pkg.dev/<PROJECT_ID>/tabletop/presenter:v1.3.2
+export PROJECT_ID="your-google-cloud-project-id"
+export REGION="us-central1"
+export AR_REPO="tabletop"
+export IMAGE_TAG="v1.3.2"
+```
 
-# 2. Deploy to Cloud Run
+#### 2. Enable Required APIs & Create Docker Repository
+Enable Cloud Run, Cloud Build, and Artifact Registry APIs, and create the Artifact Registry Docker repository if you haven't already:
+
+```bash
+# Enable required Google Cloud services
+gcloud services enable \
+  run.googleapis.com \
+  cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com \
+  --project="${PROJECT_ID}"
+
+# Create Artifact Registry Docker repository (if it doesn't already exist)
+gcloud artifacts repositories create "${AR_REPO}" \
+  --repository-format=docker \
+  --location=us \
+  --description="Docker repository for TopView" \
+  --project="${PROJECT_ID}" 2>/dev/null || true
+```
+
+#### 3. Build & Deploy
+Build the container image using Cloud Build and deploy to Cloud Run:
+
+```bash
+# Build and push container image via Cloud Build
+gcloud builds submit \
+  --project="${PROJECT_ID}" \
+  --tag "us-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/presenter:${IMAGE_TAG}"
+
+# Deploy to Cloud Run
 gcloud run deploy tabletop-presenter \
-  --image=us-docker.pkg.dev/<PROJECT_ID>/tabletop/presenter:v1.3.2 \
-  --region=us-central1 \
+  --project="${PROJECT_ID}" \
+  --image="us-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/presenter:${IMAGE_TAG}" \
+  --region="${REGION}" \
   --min-instances=1 \
   --max-instances=1 \
   --timeout=3600 \
   --no-cpu-throttling \
   --session-affinity \
+  --allow-unauthenticated \
   --platform=managed
 ```
 
