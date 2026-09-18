@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -38,14 +40,15 @@ type RoomState struct {
 	X           float64 `json:"x"`           // normalized X position (percentage)
 	Y           float64 `json:"y"`           // normalized Y position (percentage)
 	Scale       float64 `json:"scale"`       // Zoom scale
-	Layout      string  `json:"layout"`      // "1", "2-top-bottom", "2-left-right", "4"
-	AspectRatio string  `json:"aspectRatio"`  // e.g., "16:9", "16:10", "4:3", "1:1"
+	Layout      string  `json:"layout"`      // "1", "2-tb", "2-lr", "3-trb", "3-tlb", "4"
+	AspectRatio string  `json:"aspectRatio"`  // e.g., "16:9", "16:10", "4:3", "1:1", "21:9"
 }
 
 // SafeConn wraps a WebSocket connection with a mutex to prevent concurrent write panics
 type SafeConn struct {
 	conn *websocket.Conn
 	mu   sync.Mutex
+	role string
 }
 
 // WriteMessage is a concurrent-safe wrapper around write calls
@@ -135,6 +138,47 @@ func (h *Hub) removeConnection(roomID string, sc *SafeConn) {
 	}
 }
 
+func validateRoomState(s *RoomState) {
+	if math.IsNaN(s.Scale) || math.IsInf(s.Scale, 0) {
+		s.Scale = 1.0
+	} else if s.Scale < 0.1 {
+		s.Scale = 0.1
+	} else if s.Scale > 15.0 {
+		s.Scale = 15.0
+	}
+
+	switch s.Layout {
+	case "1", "2-tb", "2-lr", "3-trb", "3-tlb", "4":
+		// valid
+	default:
+		s.Layout = "1"
+	}
+
+	switch s.AspectRatio {
+	case "16:9", "16:10", "4:3", "1:1", "21:9":
+		// valid
+	default:
+		s.AspectRatio = "16:9"
+	}
+}
+
+func setupMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+
+		if origin := r.Header.Get("Origin"); origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+			w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+		}
+		if r.Method == "OPTIONS" {
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Handle WebSocket connection
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	roomID := r.URL.Query().Get("roomId")
@@ -144,7 +188,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "roomId query parameter is required", http.StatusBadRequest)
 		return
 	}
-	if role == "" {
+	if role != "admin" {
 		role = "client"
 	}
 
@@ -155,7 +199,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	// Create safe wrapped connection
-	safeConn := &SafeConn{conn: conn}
+	safeConn := &SafeConn{conn: conn, role: role}
 	defer conn.Close()
 
 	room := hub.getOrCreateRoom(roomID)
@@ -220,6 +264,13 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		switch msg.Type {
 		case "state_update":
+			if safeConn.role != "admin" {
+				log.Printf("Ignoring unauthorized state_update from %s in room %s", safeConn.role, roomID)
+				continue
+			}
+
+			validateRoomState(&msg.Payload)
+
 			room.mu.Lock()
 			room.State = msg.Payload
 			room.State.RoomID = roomID // ensure room ID is correct
@@ -274,7 +325,12 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.ParseMultipartForm(20 << 20)
+	r.Body = http.MaxBytesReader(w, r.Body, 20<<20)
+
+	if err := r.ParseMultipartForm(20 << 20); err != nil {
+		http.Error(w, fmt.Sprintf("Error parsing upload: %v", err), http.StatusBadRequest)
+		return
+	}
 
 	file, handler, err := r.FormFile("image")
 	if err != nil {
@@ -283,13 +339,45 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	ext := strings.ToLower(filepath.Ext(handler.Filename))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".webp":
+		// valid extension
+	default:
+		http.Error(w, "Invalid file extension", http.StatusBadRequest)
+		return
+	}
+
+	buf := make([]byte, 512)
+	n, err := file.Read(buf)
+	if err != nil && err != io.EOF {
+		http.Error(w, "Failed to read file", http.StatusBadRequest)
+		return
+	}
+	if n == 0 {
+		http.Error(w, "File is empty", http.StatusBadRequest)
+		return
+	}
+
+	mimeType := http.DetectContentType(buf[:n])
+	if !strings.HasPrefix(mimeType, "image/jpeg") &&
+		!strings.HasPrefix(mimeType, "image/png") &&
+		!strings.HasPrefix(mimeType, "image/webp") {
+		http.Error(w, "Invalid file content type", http.StatusBadRequest)
+		return
+	}
+
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		http.Error(w, "Failed to seek file", http.StatusInternalServerError)
+		return
+	}
+
 	uploadDir := "./uploads"
 	if err := os.MkdirAll(uploadDir, os.ModePerm); err != nil {
 		http.Error(w, "Failed to create uploads directory", http.StatusInternalServerError)
 		return
 	}
 
-	ext := filepath.Ext(handler.Filename)
 	filename := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
 	filePath := filepath.Join(uploadDir, filename)
 
@@ -358,11 +446,16 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path = filepath.Join(h.staticPath, path)
 
 	fi, err := os.Stat(path)
-	if os.IsNotExist(err) || fi.IsDir() {
-		http.ServeFile(w, r, filepath.Join(h.staticPath, h.indexPath))
-		return
-	} else if err != nil {
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.ServeFile(w, r, filepath.Join(h.staticPath, h.indexPath))
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if fi.IsDir() {
+		http.ServeFile(w, r, filepath.Join(h.staticPath, h.indexPath))
 		return
 	}
 
@@ -401,18 +494,7 @@ func main() {
 	spa := spaHandler{staticPath: distPath, indexPath: "index.html"}
 	mux.Handle("/", spa)
 
-	// Permissive CORS Handler
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if origin := r.Header.Get("Origin"); origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-			w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
-		}
-		if r.Method == "OPTIONS" {
-			return
-		}
-		mux.ServeHTTP(w, r)
-	})
+	handler := setupMiddleware(mux)
 
 	serverAddr := fmt.Sprintf("0.0.0.0:%d", *port)
 	server := &http.Server{

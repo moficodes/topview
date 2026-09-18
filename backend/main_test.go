@@ -1,0 +1,564 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"image/png"
+	"io"
+	"math"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+// Helper to generate minimal valid PNG bytes
+func generatePNG() []byte {
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	var buf bytes.Buffer
+	_ = png.Encode(&buf, img)
+	return buf.Bytes()
+}
+
+// Helper to generate minimal valid JPEG bytes
+func generateJPEG() []byte {
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	img.Set(0, 0, color.RGBA{B: 255, A: 255})
+	var buf bytes.Buffer
+	_ = jpeg.Encode(&buf, img, nil)
+	return buf.Bytes()
+}
+
+// Helper to generate minimal valid WebP bytes
+func generateWebP() []byte {
+	// RIFF (4) + length (4) + WEBP (4) + VP8 (4) + header data
+	data := []byte("RIFF\x14\x00\x00\x00WEBPVP8 \x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00")
+	return data
+}
+
+// Helper to build a multipart request
+func buildMultipartRequest(t *testing.T, fieldName, filename string, content []byte) *http.Request {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	if fieldName != "" {
+		part, err := writer.CreateFormFile(fieldName, filename)
+		if err != nil {
+			t.Fatalf("failed to create form file: %v", err)
+		}
+		if _, err := part.Write(content); err != nil {
+			t.Fatalf("failed to write content to part: %v", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/upload", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req
+}
+
+func cleanupUploads(t *testing.T) {
+	t.Cleanup(func() {
+		entries, err := os.ReadDir("./uploads")
+		if err != nil {
+			return
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				_ = os.Remove(filepath.Join("./uploads", entry.Name()))
+			}
+		}
+	})
+}
+
+func TestHandleUpload_Validation(t *testing.T) {
+	cleanupUploads(t)
+
+	t.Run("RejectsEmptyRequest", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/upload", nil)
+		rec := httptest.NewRecorder()
+
+		handleUpload(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected status %d for empty request, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("RejectsMissingImageField", func(t *testing.T) {
+		req := buildMultipartRequest(t, "document", "file.png", generatePNG())
+		rec := httptest.NewRecorder()
+
+		handleUpload(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected status %d for missing image field, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("RejectsDisallowedExtensions", func(t *testing.T) {
+		badExtensions := []string{"test.txt", "script.sh", "malware.exe", "doc.pdf", "archive.zip"}
+		for _, filename := range badExtensions {
+			req := buildMultipartRequest(t, "image", filename, []byte("some arbitrary text content"))
+			rec := httptest.NewRecorder()
+
+			handleUpload(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("expected status %d for filename %q, got %d", http.StatusBadRequest, filename, rec.Code)
+			}
+		}
+	})
+
+	t.Run("RejectsEmptyFile", func(t *testing.T) {
+		req := buildMultipartRequest(t, "image", "empty.png", []byte{})
+		rec := httptest.NewRecorder()
+
+		handleUpload(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected status %d for empty file, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("RejectsMismatchedMIMEType", func(t *testing.T) {
+		// Named .png or .jpg but containing plain text
+		req := buildMultipartRequest(t, "image", "fake.png", []byte("This is definitely plain text, not a PNG!"))
+		rec := httptest.NewRecorder()
+
+		handleUpload(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected status %d for fake png content, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("RejectsOversizedUpload", func(t *testing.T) {
+		// Send request exceeding 20MB using a streaming pipe
+		pr, pw := io.Pipe()
+		writer := multipart.NewWriter(pw)
+
+		go func() {
+			part, err := writer.CreateFormFile("image", "large.png")
+			if err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+			// Write 21MB in chunks
+			chunk := make([]byte, 64*1024)
+			var total int64
+			limit := int64(21 << 20)
+			for total < limit {
+				n, err := part.Write(chunk)
+				if err != nil {
+					pw.CloseWithError(err)
+					return
+				}
+				total += int64(n)
+			}
+			writer.Close()
+			pw.Close()
+		}()
+
+		req := httptest.NewRequest(http.MethodPost, "/api/upload", pr)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		rec := httptest.NewRecorder()
+
+		handleUpload(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected status %d for upload >20MB, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("AcceptsValidPNG", func(t *testing.T) {
+		pngBytes := generatePNG()
+		req := buildMultipartRequest(t, "image", "valid.png", pngBytes)
+		rec := httptest.NewRecorder()
+
+		handleUpload(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d for valid PNG, got %d", http.StatusOK, rec.Code)
+		}
+
+		var resp map[string]string
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode JSON response: %v", err)
+		}
+		if !strings.HasPrefix(resp["url"], "/uploads/") || !strings.HasSuffix(resp["url"], ".png") {
+			t.Errorf("unexpected upload url: %s", resp["url"])
+		}
+	})
+
+	t.Run("AcceptsValidJPEG", func(t *testing.T) {
+		jpegBytes := generateJPEG()
+		req := buildMultipartRequest(t, "image", "valid.jpg", jpegBytes)
+		rec := httptest.NewRecorder()
+
+		handleUpload(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d for valid JPEG, got %d", http.StatusOK, rec.Code)
+		}
+
+		var resp map[string]string
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode JSON response: %v", err)
+		}
+		if !strings.HasPrefix(resp["url"], "/uploads/") || !strings.HasSuffix(resp["url"], ".jpg") {
+			t.Errorf("unexpected upload url: %s", resp["url"])
+		}
+	})
+
+	t.Run("AcceptsValidWebP", func(t *testing.T) {
+		webpBytes := generateWebP()
+		req := buildMultipartRequest(t, "image", "valid.webp", webpBytes)
+		rec := httptest.NewRecorder()
+
+		handleUpload(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d for valid WebP, got %d", http.StatusOK, rec.Code)
+		}
+
+		var resp map[string]string
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode JSON response: %v", err)
+		}
+		if !strings.HasPrefix(resp["url"], "/uploads/") || !strings.HasSuffix(resp["url"], ".webp") {
+			t.Errorf("unexpected upload url: %s", resp["url"])
+		}
+	})
+
+	t.Run("AcceptsCaseInsensitiveExtension", func(t *testing.T) {
+		jpegBytes := generateJPEG()
+		req := buildMultipartRequest(t, "image", "VALID.JPEG", jpegBytes)
+		rec := httptest.NewRecorder()
+
+		handleUpload(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d for VALID.JPEG, got %d", http.StatusOK, rec.Code)
+		}
+	})
+}
+
+func TestRoomState_Validation(t *testing.T) {
+	t.Run("ScaleNaNAndInf", func(t *testing.T) {
+		nanState := RoomState{Scale: math.NaN()}
+		validateRoomState(&nanState)
+		if math.IsNaN(nanState.Scale) || nanState.Scale != 1.0 {
+			t.Errorf("expected NaN scale to become 1.0, got %v", nanState.Scale)
+		}
+
+		posInfState := RoomState{Scale: math.Inf(1)}
+		validateRoomState(&posInfState)
+		if math.IsInf(posInfState.Scale, 1) || posInfState.Scale != 1.0 {
+			t.Errorf("expected +Inf scale to become 1.0, got %v", posInfState.Scale)
+		}
+
+		negInfState := RoomState{Scale: math.Inf(-1)}
+		validateRoomState(&negInfState)
+		if math.IsInf(negInfState.Scale, -1) || negInfState.Scale != 1.0 {
+			t.Errorf("expected -Inf scale to become 1.0, got %v", negInfState.Scale)
+		}
+	})
+
+	t.Run("ScaleClamping", func(t *testing.T) {
+		tooSmall := RoomState{Scale: 0.05}
+		validateRoomState(&tooSmall)
+		if tooSmall.Scale != 0.1 {
+			t.Errorf("expected scale 0.05 to clamp to 0.1, got %v", tooSmall.Scale)
+		}
+
+		negative := RoomState{Scale: -1.0}
+		validateRoomState(&negative)
+		if negative.Scale != 0.1 {
+			t.Errorf("expected negative scale to clamp to 0.1, got %v", negative.Scale)
+		}
+
+		tooBig := RoomState{Scale: 20.0}
+		validateRoomState(&tooBig)
+		if tooBig.Scale != 15.0 {
+			t.Errorf("expected scale 20.0 to clamp to 15.0, got %v", tooBig.Scale)
+		}
+
+		valid := RoomState{Scale: 5.5}
+		validateRoomState(&valid)
+		if valid.Scale != 5.5 {
+			t.Errorf("expected valid scale 5.5 to remain unchanged, got %v", valid.Scale)
+		}
+	})
+
+	t.Run("LayoutValidation", func(t *testing.T) {
+		validLayouts := []string{"1", "2-tb", "2-lr", "3-trb", "3-tlb", "4"}
+		for _, l := range validLayouts {
+			s := RoomState{Layout: l}
+			validateRoomState(&s)
+			if s.Layout != l {
+				t.Errorf("expected valid layout %q to be preserved, got %q", l, s.Layout)
+			}
+		}
+
+		invalidLayouts := []string{"", "0", "5", "custom", "unknown"}
+		for _, l := range invalidLayouts {
+			s := RoomState{Layout: l}
+			validateRoomState(&s)
+			if s.Layout != "1" {
+				t.Errorf("expected invalid layout %q to default to '1', got %q", l, s.Layout)
+			}
+		}
+	})
+
+	t.Run("AspectRatioValidation", func(t *testing.T) {
+		validAspectRatios := []string{"16:9", "16:10", "4:3", "1:1", "21:9"}
+		for _, ar := range validAspectRatios {
+			s := RoomState{AspectRatio: ar}
+			validateRoomState(&s)
+			if s.AspectRatio != ar {
+				t.Errorf("expected valid aspectRatio %q to be preserved, got %q", ar, s.AspectRatio)
+			}
+		}
+
+		invalidAspectRatios := []string{"", "3:2", "custom", "16:8"}
+		for _, ar := range invalidAspectRatios {
+			s := RoomState{AspectRatio: ar}
+			validateRoomState(&s)
+			if s.AspectRatio != "16:9" {
+				t.Errorf("expected invalid aspectRatio %q to default to '16:9', got %q", ar, s.AspectRatio)
+			}
+		}
+	})
+}
+
+func TestWebSocket_RoleAuthorization(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(handleWebSocket))
+	defer server.Close()
+
+	roomID := fmt.Sprintf("test-room-auth-%d", time.Now().UnixNano())
+	wsBaseURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	// Connect Admin
+	adminURL := fmt.Sprintf("%s/ws?roomId=%s&role=admin", wsBaseURL, roomID)
+	adminConn, _, err := websocket.DefaultDialer.Dial(adminURL, nil)
+	if err != nil {
+		t.Fatalf("failed to connect admin: %v", err)
+	}
+	defer adminConn.Close()
+
+	// Read admin's initial state
+	var adminInit WSMessage
+	if err := adminConn.ReadJSON(&adminInit); err != nil {
+		t.Fatalf("failed to read admin init: %v", err)
+	}
+	if adminInit.Type != "init" {
+		t.Fatalf("expected admin init type 'init', got %q", adminInit.Type)
+	}
+
+	// Connect Client
+	clientURL := fmt.Sprintf("%s/ws?roomId=%s&role=client", wsBaseURL, roomID)
+	clientConn, _, err := websocket.DefaultDialer.Dial(clientURL, nil)
+	if err != nil {
+		t.Fatalf("failed to connect client: %v", err)
+	}
+	defer clientConn.Close()
+
+	// Read client's initial state
+	var clientInit WSMessage
+	if err := clientConn.ReadJSON(&clientInit); err != nil {
+		t.Fatalf("failed to read client init: %v", err)
+	}
+	if clientInit.Type != "init" {
+		t.Fatalf("expected client init type 'init', got %q", clientInit.Type)
+	}
+
+	// Attempt 1: Client tries to send state_update -> MUST BE REJECTED
+	clientUnauthorizedUpdate := WSMessage{
+		Type: "state_update",
+		Payload: RoomState{
+			RoomID: roomID,
+			Scale:  4.5,
+			Layout: "4",
+		},
+	}
+	if err := clientConn.WriteJSON(clientUnauthorizedUpdate); err != nil {
+		t.Fatalf("failed to send client update: %v", err)
+	}
+
+	// Admin should NOT receive any broadcast
+	_ = adminConn.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
+	var unauthBroadcast WSMessage
+	err = adminConn.ReadJSON(&unauthBroadcast)
+	if err == nil {
+		t.Fatalf("expected no broadcast to admin for client state_update, but received: %+v", unauthBroadcast)
+	}
+
+	// Verify room state was NOT changed
+	hub.mu.RLock()
+	room := hub.rooms[roomID]
+	hub.mu.RUnlock()
+	if room != nil {
+		room.mu.Lock()
+		if room.State.Scale == 4.5 {
+			room.mu.Unlock()
+			t.Fatalf("room state was modified by unauthorized client update")
+		}
+		room.mu.Unlock()
+	}
+
+	// Attempt 2: Admin sends state_update -> MUST BE ACCEPTED AND BROADCAST
+	adminAuthorizedUpdate := WSMessage{
+		Type: "state_update",
+		Payload: RoomState{
+			RoomID:      roomID,
+			Scale:       2.5,
+			Layout:      "2-tb",
+			AspectRatio: "16:9",
+		},
+	}
+	if err := adminConn.WriteJSON(adminAuthorizedUpdate); err != nil {
+		t.Fatalf("failed to send admin update: %v", err)
+	}
+
+	// Client should receive the broadcast
+	_ = clientConn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	var authBroadcast WSMessage
+	if err := clientConn.ReadJSON(&authBroadcast); err != nil {
+		t.Fatalf("expected client to receive admin broadcast, got err: %v", err)
+	}
+	if authBroadcast.Type != "state_update" {
+		t.Errorf("expected broadcast type 'state_update', got %q", authBroadcast.Type)
+	}
+	if authBroadcast.Payload.Scale != 2.5 || authBroadcast.Payload.Layout != "2-tb" {
+		t.Errorf("unexpected broadcast payload: %+v", authBroadcast.Payload)
+	}
+}
+
+func TestSpaHandler(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Write static files
+	indexContent := "<html><body>Index Fallback</body></html>"
+	if err := os.WriteFile(filepath.Join(tempDir, "index.html"), []byte(indexContent), 0644); err != nil {
+		t.Fatalf("failed to write index.html: %v", err)
+	}
+
+	assetContent := "body { color: red; }"
+	if err := os.WriteFile(filepath.Join(tempDir, "style.css"), []byte(assetContent), 0644); err != nil {
+		t.Fatalf("failed to write style.css: %v", err)
+	}
+
+	handler := spaHandler{
+		staticPath: tempDir,
+		indexPath:  "index.html",
+	}
+
+	t.Run("ServesExistingStaticFile", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/style.css", nil)
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "color: red") {
+			t.Errorf("expected body to contain CSS content, got %q", rec.Body.String())
+		}
+	})
+
+	t.Run("ServesIndexFallbackOnNonExistentPath", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/room/abc-123", nil)
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "Index Fallback") {
+			t.Errorf("expected body to contain index fallback, got %q", rec.Body.String())
+		}
+	})
+
+	t.Run("ServesIndexFallbackOnDirectory", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "Index Fallback") {
+			t.Errorf("expected body to contain index fallback, got %q", rec.Body.String())
+		}
+	})
+
+	t.Run("StatErrorHandling_NoPanicOnNonNotExistError", func(t *testing.T) {
+		// Create a restricted directory with mode 0000 to trigger EACCES (permission denied)
+		restrictedDir := filepath.Join(tempDir, "restricted")
+		if err := os.Mkdir(restrictedDir, 0755); err != nil {
+			t.Fatalf("failed to create restricted dir: %v", err)
+		}
+		secretFile := filepath.Join(restrictedDir, "secret.txt")
+		if err := os.WriteFile(secretFile, []byte("secret"), 0644); err != nil {
+			t.Fatalf("failed to write secret file: %v", err)
+		}
+
+		if err := os.Chmod(restrictedDir, 0000); err != nil {
+			t.Fatalf("failed to chmod restricted dir: %v", err)
+		}
+		defer os.Chmod(restrictedDir, 0755)
+
+		req := httptest.NewRequest(http.MethodGet, "/restricted/secret.txt", nil)
+		rec := httptest.NewRecorder()
+
+		// Protect against unhandled panics (the bug being tested)
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("spaHandler panicked on non-NotExist os.Stat error: %v", r)
+			}
+		}()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("expected status %d for unreadable file, got %d", http.StatusInternalServerError, rec.Code)
+		}
+	})
+}
+
+func TestSecurityHeaders(t *testing.T) {
+	dummyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	middleware := setupMiddleware(dummyHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/rooms", nil)
+	rec := httptest.NewRecorder()
+
+	middleware.ServeHTTP(rec, req)
+
+	if val := rec.Header().Get("X-Content-Type-Options"); val != "nosniff" {
+		t.Errorf("expected X-Content-Type-Options: nosniff, got %q", val)
+	}
+	if val := rec.Header().Get("X-Frame-Options"); val != "SAMEORIGIN" {
+		t.Errorf("expected X-Frame-Options: SAMEORIGIN, got %q", val)
+	}
+}
