@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { InteractiveCanvas } from "../components/InteractiveCanvas";
 import { TabletopViewports } from "../components/TabletopViewports";
 import {
@@ -15,6 +15,8 @@ import {
   ChevronDown,
   ChevronRight,
   Tv,
+  Key,
+  ShieldAlert,
 } from "lucide-react";
 
 interface RoomState {
@@ -45,6 +47,14 @@ const PRESET_IMAGES = [
 export const Admin: React.FC = () => {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const adminKey = searchParams.get("key") || "";
+
+  const [clientKey, setClientKey] = useState("");
+  const [pinCopied, setPinCopied] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [keyInput, setKeyInput] = useState("");
+
   const [imgUrl, setImgUrl] = useState("");
   const [x, setX] = useState(0);
   const [y, setY] = useState(0);
@@ -204,7 +214,17 @@ export const Admin: React.FC = () => {
   // Set up WebSocket connection with automatic reconnect
   useEffect(() => {
     if (!roomId) return;
+
+    if (!adminKey) {
+      const timer = setTimeout(() => {
+        setAuthError("Admin key is missing. Please enter the admin key to manage this room.");
+        setWsConnected(false);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+
     let isUnmounted = false;
+    let hasOpened = false;
 
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
@@ -213,7 +233,7 @@ export const Admin: React.FC = () => {
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws?roomId=${roomId}&role=admin`;
+    const wsUrl = `${protocol}//${host}/ws?roomId=${roomId}&role=admin&key=${encodeURIComponent(adminKey)}`;
 
     log("Connecting WebSocket to " + wsUrl);
     const ws = new WebSocket(wsUrl);
@@ -224,6 +244,8 @@ export const Admin: React.FC = () => {
         ws.close();
         return;
       }
+      hasOpened = true;
+      setAuthError("");
       setWsConnected(true);
       reconnectAttemptsRef.current = 0;
       log("WebSocket connected");
@@ -245,17 +267,22 @@ export const Admin: React.FC = () => {
         const msg = JSON.parse(event.data);
         if (msg.type === "init") {
           log("WebSocket init state received", msg.payload);
+          if (msg.clientKey) {
+            setClientKey(msg.clientKey);
+          }
           const p = msg.payload;
-          if (p.imgUrl) {
-            setImgUrl(p.imgUrl);
-            setX(p.x || 0);
-            setY(p.y || 0);
-            setScale(p.scale || 1);
-            setLayout(p.layout || "1");
-            setAspectRatio(p.aspectRatio || "16:9");
-          } else if (stateRef.current.imgUrl) {
-            // Restore previous state if server reconnected and room was reset
-            sendStateUpdate({}, true);
+          if (p) {
+            if (p.imgUrl) {
+              setImgUrl(p.imgUrl);
+              setX(p.x || 0);
+              setY(p.y || 0);
+              setScale(p.scale || 1);
+              setLayout(p.layout || "1");
+              setAspectRatio(p.aspectRatio || "16:9");
+            } else if (stateRef.current.imgUrl) {
+              // Restore previous state if server reconnected and room was reset
+              sendStateUpdate({}, true);
+            }
           }
         }
       } catch (err) {
@@ -266,9 +293,16 @@ export const Admin: React.FC = () => {
     ws.onclose = () => {
       setWsConnected(false);
       if (isUnmounted) return;
+      if (!hasOpened) {
+        setAuthError("Unauthorized: Invalid admin key or failed to connect to room.");
+        return;
+      }
       const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000);
       reconnectAttemptsRef.current += 1;
       log(`WebSocket disconnected, scheduling reconnect in ${delay}ms...`);
+      if (reconnectAttemptsRef.current > 5) {
+        setAuthError("Connection lost. Unable to reconnect to room.");
+      }
       reconnectTimerRef.current = setTimeout(() => {
         if (!isUnmounted) {
           setReconnectTrigger((prev) => prev + 1);
@@ -290,7 +324,7 @@ export const Admin: React.FC = () => {
       ws.onclose = null;
       ws.close();
     };
-  }, [roomId, reconnectTrigger, log, sendStateUpdate]);
+  }, [roomId, adminKey, reconnectTrigger, log, sendStateUpdate]);
 
   const handleCanvasChange = (state: { x: number; y: number; scale: number }) => {
     setX(state.x);
@@ -364,11 +398,21 @@ export const Admin: React.FC = () => {
   };
 
   const copyClientLink = () => {
-    const clientUrl = `${window.location.protocol}//${window.location.host}/room/${roomId}`;
+    const clientUrl = `${window.location.protocol}//${window.location.host}/room/${roomId}${
+      clientKey ? `?key=${clientKey}` : ""
+    }`;
     navigator.clipboard.writeText(clientUrl).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
+  };
+
+  const handleAuthSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!keyInput.trim()) return;
+    setAuthError("");
+    setSearchParams({ key: keyInput.trim() });
+    setReconnectTrigger((prev) => prev + 1);
   };
 
   const getLayoutLabel = (l: string) => {
@@ -421,6 +465,22 @@ export const Admin: React.FC = () => {
 
         {/* Link Share */}
         <div className="flex items-center gap-2">
+          {clientKey && (
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(clientKey);
+                setPinCopied(true);
+                setTimeout(() => setPinCopied(false), 2000);
+              }}
+              className="flex items-center gap-1 px-2.5 py-1 bg-gray-900/90 border border-gray-800 hover:border-purple-500/50 rounded-lg text-xs font-mono text-purple-300 transition-all cursor-pointer"
+              title="Click to copy participant passcode"
+            >
+              <span className="text-gray-500 text-[10px]">PIN:</span>
+              <span className="font-bold tracking-widest">{clientKey}</span>
+              {pinCopied ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3 text-gray-400" />}
+            </button>
+          )}
           <span className="text-xs text-gray-500 font-mono hidden sm:block">
             Viewer Link:
           </span>
@@ -859,6 +919,61 @@ export const Admin: React.FC = () => {
           </div>
         </main>
       </div>
+
+      {/* Admin Authentication Required Modal */}
+      {authError && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#13141c] border border-gray-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400">
+                <ShieldAlert className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-white">Admin Authentication Required</h2>
+                <p className="text-xs text-gray-400 font-mono">Room: {roomId}</p>
+              </div>
+            </div>
+
+            <div className="text-xs text-red-400 bg-red-950/40 border border-red-900/60 p-3 rounded-xl leading-relaxed">
+              {authError}
+            </div>
+
+            <form onSubmit={handleAuthSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <label htmlFor="adminKeyInput" className="block text-xs font-medium text-gray-400">
+                  Admin Passkey
+                </label>
+                <input
+                  id="adminKeyInput"
+                  type="text"
+                  value={keyInput}
+                  onChange={(e) => setKeyInput(e.target.value)}
+                  placeholder="Enter admin key (e.g. adm_...)"
+                  className="w-full px-3.5 py-2.5 bg-gray-950 border border-gray-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 text-sm font-mono text-white placeholder-gray-600 transition-all"
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => navigate("/")}
+                  className="flex-1 py-2.5 px-4 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-gray-300 font-semibold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <ArrowLeft className="w-4 h-4" /> Return Home
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 px-4 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-xl text-xs shadow-lg shadow-purple-600/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Key className="w-4 h-4" /> Authenticate
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

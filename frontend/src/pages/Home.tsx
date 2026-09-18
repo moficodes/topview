@@ -11,6 +11,7 @@ interface RoomInfo {
 
 export const Home: React.FC = () => {
   const [roomId, setRoomId] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
   const [activeRooms, setActiveRooms] = useState<RoomInfo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
@@ -53,12 +54,34 @@ export const Home: React.FC = () => {
     };
   }, []);
 
-  const handleCreateRoom = (e: React.FormEvent) => {
+  const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!roomId.trim()) return;
     const cleanId = roomId.trim().toLowerCase().replace(/[^a-z0-9-_]/g, "");
-    if (cleanId) {
-      navigate(`/admin/${cleanId}`);
+    if (!cleanId) return;
+
+    setErrorMsg("");
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/rooms/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId: cleanId }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        navigate(`/admin/${data.roomId}?key=${encodeURIComponent(data.adminKey)}`);
+      } else if (res.status === 403) {
+        setErrorMsg("This room is already claimed by another admin. Choose a different room ID.");
+      } else {
+        setErrorMsg("Failed to initialize room. Please try again.");
+      }
+    } catch (err) {
+      console.error("Room creation error:", err);
+      setErrorMsg("Network error connecting to server.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -73,6 +96,7 @@ export const Home: React.FC = () => {
     const noun = nouns[Math.floor(Math.random() * nouns.length)];
     const num = Math.floor(100 + Math.random() * 900);
     setRoomId(`${adj}-${noun}-${num}`);
+    if (errorMsg) setErrorMsg("");
   };
 
   return (
@@ -135,7 +159,10 @@ export const Home: React.FC = () => {
                   id="roomId"
                   type="text"
                   value={roomId}
-                  onChange={(e) => setRoomId(e.target.value)}
+                  onChange={(e) => {
+                    setRoomId(e.target.value);
+                    if (errorMsg) setErrorMsg("");
+                  }}
                   placeholder="e.g., table-alpha-101"
                   className="flex-1 px-4 py-2.5 bg-gray-950/80 border border-gray-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 text-sm placeholder-gray-600 transition-all font-mono"
                   required
@@ -149,6 +176,11 @@ export const Home: React.FC = () => {
                   Random
                 </button>
               </div>
+              {errorMsg && (
+                <div className="text-xs text-red-400 bg-red-950/40 border border-red-900/60 p-2 rounded-lg">
+                  {errorMsg}
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3 pt-2">
