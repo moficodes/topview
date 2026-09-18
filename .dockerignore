@@ -9,6 +9,8 @@ backend/uploads
 # Ignore git and local OS artifacts
 .git
 .gitignore
+.worktrees
+docs
 .DS_Store
 .vscode
 .idea
