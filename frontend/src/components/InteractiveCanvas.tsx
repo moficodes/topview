@@ -165,6 +165,7 @@ export const InteractiveCanvas: React.FC<InteractiveCanvasProps> = ({
   };
 
   const handleLostPointerCapture = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!pointersRef.current.has(e.pointerId)) return;
     pointersRef.current.delete(e.pointerId);
     if (pointersRef.current.size === 0) {
       setIsDragging(false);

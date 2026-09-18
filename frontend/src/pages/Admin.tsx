@@ -55,6 +55,7 @@ export const Admin: React.FC = () => {
   const wsRef = useRef<WebSocket | null>(null);
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
 
   // Latest state ref for callbacks and re-sync
   const stateRef = useRef({ imgUrl, x, y, scale, layout, aspectRatio });
@@ -73,6 +74,23 @@ export const Admin: React.FC = () => {
     [roomId]
   );
 
+  const buildPayload = useCallback(
+    (update: Partial<RoomState>): RoomState => {
+      const current = stateRef.current;
+      return {
+        roomId: roomId || "",
+        imgUrl: update.imgUrl !== undefined ? update.imgUrl : current.imgUrl,
+        x: update.x !== undefined ? update.x : current.x,
+        y: update.y !== undefined ? update.y : current.y,
+        scale: update.scale !== undefined ? update.scale : current.scale,
+        layout: update.layout !== undefined ? update.layout : current.layout,
+        aspectRatio:
+          update.aspectRatio !== undefined ? update.aspectRatio : current.aspectRatio,
+      };
+    },
+    [roomId]
+  );
+
   // Flush any pending throttled updates immediately
   const flushPendingUpdates = useCallback(() => {
     if (rafIdRef.current !== null) {
@@ -86,25 +104,13 @@ export const Admin: React.FC = () => {
 
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-    const current = stateRef.current;
-    const payload: RoomState = {
-      roomId: roomId || "",
-      imgUrl: updateToSend.imgUrl !== undefined ? updateToSend.imgUrl : current.imgUrl,
-      x: updateToSend.x !== undefined ? updateToSend.x : current.x,
-      y: updateToSend.y !== undefined ? updateToSend.y : current.y,
-      scale: updateToSend.scale !== undefined ? updateToSend.scale : current.scale,
-      layout: updateToSend.layout !== undefined ? updateToSend.layout : current.layout,
-      aspectRatio:
-        updateToSend.aspectRatio !== undefined ? updateToSend.aspectRatio : current.aspectRatio,
-    };
-
     wsRef.current.send(
       JSON.stringify({
         type: "state_update",
-        payload,
+        payload: buildPayload(updateToSend),
       })
     );
-  }, [roomId]);
+  }, [buildPayload]);
 
   // Sync state over WebSocket whenever it changes (with optional rAF throttling)
   const sendStateUpdate = useCallback(
@@ -123,22 +129,10 @@ export const Admin: React.FC = () => {
 
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-        const current = stateRef.current;
-        const payload: RoomState = {
-          roomId: roomId || "",
-          imgUrl: mergedState.imgUrl !== undefined ? mergedState.imgUrl : current.imgUrl,
-          x: mergedState.x !== undefined ? mergedState.x : current.x,
-          y: mergedState.y !== undefined ? mergedState.y : current.y,
-          scale: mergedState.scale !== undefined ? mergedState.scale : current.scale,
-          layout: mergedState.layout !== undefined ? mergedState.layout : current.layout,
-          aspectRatio:
-            mergedState.aspectRatio !== undefined ? mergedState.aspectRatio : current.aspectRatio,
-        };
-
         wsRef.current.send(
           JSON.stringify({
             type: "state_update",
-            payload,
+            payload: buildPayload(mergedState),
           })
         );
       } else {
@@ -157,24 +151,10 @@ export const Admin: React.FC = () => {
 
               if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-              const current = stateRef.current;
-              const payload: RoomState = {
-                roomId: roomId || "",
-                imgUrl: updateToSend.imgUrl !== undefined ? updateToSend.imgUrl : current.imgUrl,
-                x: updateToSend.x !== undefined ? updateToSend.x : current.x,
-                y: updateToSend.y !== undefined ? updateToSend.y : current.y,
-                scale: updateToSend.scale !== undefined ? updateToSend.scale : current.scale,
-                layout: updateToSend.layout !== undefined ? updateToSend.layout : current.layout,
-                aspectRatio:
-                  updateToSend.aspectRatio !== undefined
-                    ? updateToSend.aspectRatio
-                    : current.aspectRatio,
-              };
-
               wsRef.current.send(
                 JSON.stringify({
                   type: "state_update",
-                  payload,
+                  payload: buildPayload(updateToSend),
                 })
               );
             }
@@ -182,7 +162,7 @@ export const Admin: React.FC = () => {
         }
       }
     },
-    [roomId]
+    [buildPayload]
   );
 
   // Clean up RAF on unmount
@@ -219,6 +199,7 @@ export const Admin: React.FC = () => {
         return;
       }
       setWsConnected(true);
+      reconnectAttemptsRef.current = 0;
       log("WebSocket connected");
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
@@ -252,12 +233,14 @@ export const Admin: React.FC = () => {
     ws.onclose = () => {
       setWsConnected(false);
       if (isUnmounted) return;
-      log("WebSocket disconnected, scheduling reconnect...");
+      const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000);
+      reconnectAttemptsRef.current += 1;
+      log(`WebSocket disconnected, scheduling reconnect in ${delay}ms...`);
       reconnectTimerRef.current = setTimeout(() => {
         if (!isUnmounted) {
           setReconnectTrigger((prev) => prev + 1);
         }
-      }, 2000);
+      }, delay);
     };
 
     ws.onerror = (err) => {
