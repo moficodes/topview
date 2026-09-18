@@ -97,6 +97,13 @@ export const RoomClient: React.FC = () => {
       console.log(`[Client:${roomId}] WebSocket connected successfully`);
     };
 
+    // Client-side keepalive heartbeat every 25 seconds to prevent network idle timeouts
+    const heartbeatInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "ping" }));
+      }
+    }, 25000);
+
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
@@ -138,6 +145,7 @@ export const RoomClient: React.FC = () => {
 
     return () => {
       isUnmounted = true;
+      clearInterval(heartbeatInterval);
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;

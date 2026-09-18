@@ -30,7 +30,8 @@ const (
 	pongWait = 60 * time.Second
 
 	// Send pings to peer with this period. Must be less than pongWait.
-	pingPeriod = (pongWait * 9) / 10
+	// 25 seconds ensures frequent keepalives through cloud proxies and NAT gateways.
+	pingPeriod = 25 * time.Second
 )
 
 // RoomState defines the state of a room's canvas and visual layout
@@ -284,6 +285,9 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 			break
 		}
+
+		// Reset read deadline on any received traffic
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 
 		var msg WSMessage
 		if err := json.Unmarshal(message, &msg); err != nil {
