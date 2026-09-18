@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -90,10 +94,36 @@ func (sc *SafeConn) writePump() {
 
 // Room represents a dynamic room with its state and safe client connections
 type Room struct {
-	ID      string
-	State   RoomState
-	Clients map[*SafeConn]string // conn -> role ("admin" or "client")
-	mu      sync.Mutex
+	ID        string
+	AdminKey  string
+	ClientKey string
+	State     RoomState
+	Clients   map[*SafeConn]string // SafeConn -> role ("admin" or "client")
+	mu        sync.Mutex
+}
+
+func generateAdminKey() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return "adm_" + hex.EncodeToString(b)
+}
+
+func generateClientKey() string {
+	var n uint32
+	_ = binary.Read(rand.Reader, binary.BigEndian, &n)
+	code := 100000 + (n % 900000)
+	return fmt.Sprintf("%06d", code)
+}
+
+func sanitizeRoomID(id string) string {
+	id = strings.ToLower(strings.TrimSpace(id))
+	var b strings.Builder
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // Hub manages all the rooms
@@ -126,7 +156,9 @@ func (h *Hub) getOrCreateRoom(roomID string) *Room {
 	room, exists := h.rooms[roomID]
 	if !exists {
 		room = &Room{
-			ID: roomID,
+			ID:        roomID,
+			AdminKey:  generateAdminKey(),
+			ClientKey: generateClientKey(),
 			State: RoomState{
 				RoomID:      roomID,
 				ImgURL:      "",
@@ -442,6 +474,88 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// API endpoint to create or claim a room with admin & client keys
+func handleCreateRoom(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	type createReq struct {
+		RoomID   string `json:"roomId"`
+		AdminKey string `json:"adminKey"`
+	}
+
+	type createResp struct {
+		RoomID    string `json:"roomId"`
+		AdminKey  string `json:"adminKey"`
+		ClientKey string `json:"clientKey"`
+	}
+
+	var req createReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Error parsing request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	roomID := sanitizeRoomID(req.RoomID)
+	if roomID == "" {
+		http.Error(w, "roomId is required", http.StatusBadRequest)
+		return
+	}
+
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+
+	room, exists := hub.rooms[roomID]
+	if exists {
+		if req.AdminKey != "" && subtle.ConstantTimeCompare([]byte(req.AdminKey), []byte(room.AdminKey)) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(createResp{
+				RoomID:    room.ID,
+				AdminKey:  room.AdminKey,
+				ClientKey: room.ClientKey,
+			})
+			return
+		}
+		http.Error(w, "Room already claimed by another admin", http.StatusForbidden)
+		return
+	}
+
+	room = &Room{
+		ID:        roomID,
+		AdminKey:  generateAdminKey(),
+		ClientKey: generateClientKey(),
+		State: RoomState{
+			RoomID:      roomID,
+			ImgURL:      "",
+			X:           0.0,
+			Y:           0.0,
+			Scale:       1.0,
+			Layout:      "1",
+			AspectRatio: "16:9",
+		},
+		Clients: make(map[*SafeConn]string),
+	}
+	hub.rooms[roomID] = room
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(createResp{
+		RoomID:    room.ID,
+		AdminKey:  room.AdminKey,
+		ClientKey: room.ClientKey,
+	})
+}
+
 // API endpoint to list active rooms
 func handleRoomsList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -523,6 +637,7 @@ func main() {
 
 	mux.HandleFunc("/ws", handleWebSocket)
 	mux.HandleFunc("/api/upload", handleUpload)
+	mux.HandleFunc("/api/rooms/create", handleCreateRoom)
 	mux.HandleFunc("/api/rooms", handleRoomsList)
 
 	fs := http.FileServer(http.Dir("./uploads"))

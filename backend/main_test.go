@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -821,5 +822,187 @@ func TestRoomPruningRace(t *testing.T) {
 
 	if stillExists {
 		t.Errorf("expected room %s to be pruned after all clients disconnected, but still exists in hub", roomID)
+	}
+}
+
+func TestRoomCreation_Success(t *testing.T) {
+	roomID := "test-room-create"
+	hub.mu.Lock()
+	delete(hub.rooms, roomID)
+	hub.mu.Unlock()
+	t.Cleanup(func() {
+		hub.mu.Lock()
+		delete(hub.rooms, roomID)
+		hub.mu.Unlock()
+	})
+
+	body := `{"roomId": "test-room-create"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/rooms/create", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handleCreateRoom(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		RoomID    string `json:"roomId"`
+		AdminKey  string `json:"adminKey"`
+		ClientKey string `json:"clientKey"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response JSON: %v", err)
+	}
+
+	if resp.RoomID != roomID {
+		t.Errorf("expected roomId %q, got %q", roomID, resp.RoomID)
+	}
+
+	if !strings.HasPrefix(resp.AdminKey, "adm_") || len(resp.AdminKey) < 20 {
+		t.Errorf("expected adminKey to start with 'adm_' and have length >= 20, got %q (len %d)", resp.AdminKey, len(resp.AdminKey))
+	}
+
+	matched, err := regexp.MatchString(`^[0-9]{6}$`, resp.ClientKey)
+	if err != nil || !matched {
+		t.Errorf("expected clientKey to be exactly 6 digits, got %q", resp.ClientKey)
+	}
+}
+
+func TestRoomCreation_ExistingRoomReclaim(t *testing.T) {
+	roomID := "test-room-reclaim"
+	hub.mu.Lock()
+	delete(hub.rooms, roomID)
+	hub.mu.Unlock()
+	t.Cleanup(func() {
+		hub.mu.Lock()
+		delete(hub.rooms, roomID)
+		hub.mu.Unlock()
+	})
+
+	// 1. Create room first
+	createBody := fmt.Sprintf(`{"roomId": %q}`, roomID)
+	req := httptest.NewRequest(http.MethodPost, "/api/rooms/create", strings.NewReader(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handleCreateRoom(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("initial creation failed with status %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var initialResp struct {
+		RoomID    string `json:"roomId"`
+		AdminKey  string `json:"adminKey"`
+		ClientKey string `json:"clientKey"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&initialResp); err != nil {
+		t.Fatalf("failed to decode initial creation response: %v", err)
+	}
+
+	// 2. Send POST /api/rooms/create with same roomId and matching adminKey
+	reclaimBody := fmt.Sprintf(`{"roomId": %q, "adminKey": %q}`, roomID, initialResp.AdminKey)
+	req = httptest.NewRequest(http.MethodPost, "/api/rooms/create", strings.NewReader(reclaimBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handleCreateRoom(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on matching adminKey reclaim, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var reclaimResp struct {
+		RoomID    string `json:"roomId"`
+		AdminKey  string `json:"adminKey"`
+		ClientKey string `json:"clientKey"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&reclaimResp); err != nil {
+		t.Fatalf("failed to decode reclaim response: %v", err)
+	}
+	if reclaimResp.AdminKey != initialResp.AdminKey {
+		t.Errorf("expected same adminKey %q, got %q", initialResp.AdminKey, reclaimResp.AdminKey)
+	}
+	if reclaimResp.ClientKey != initialResp.ClientKey {
+		t.Errorf("expected same clientKey %q, got %q", initialResp.ClientKey, reclaimResp.ClientKey)
+	}
+
+	// 3. Send POST /api/rooms/create with same roomId and wrong adminKey
+	wrongKeyBody := fmt.Sprintf(`{"roomId": %q, "adminKey": %q}`, roomID, "adm_wrongkey1234567890")
+	req = httptest.NewRequest(http.MethodPost, "/api/rooms/create", strings.NewReader(wrongKeyBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handleCreateRoom(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden on wrong adminKey, got %d", rec.Code)
+	}
+
+	// 4. Send POST /api/rooms/create with same roomId and empty adminKey
+	emptyKeyBody := fmt.Sprintf(`{"roomId": %q, "adminKey": ""}`, roomID)
+	req = httptest.NewRequest(http.MethodPost, "/api/rooms/create", strings.NewReader(emptyKeyBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handleCreateRoom(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden on empty adminKey, got %d", rec.Code)
+	}
+}
+
+func TestPublicRoomsList_NeverLeaksKeys(t *testing.T) {
+	roomID := "test-room-leak-check"
+	hub.mu.Lock()
+	delete(hub.rooms, roomID)
+	hub.mu.Unlock()
+	t.Cleanup(func() {
+		hub.mu.Lock()
+		delete(hub.rooms, roomID)
+		hub.mu.Unlock()
+	})
+
+	// Create a room first
+	createBody := fmt.Sprintf(`{"roomId": %q}`, roomID)
+	req := httptest.NewRequest(http.MethodPost, "/api/rooms/create", strings.NewReader(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handleCreateRoom(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to create room for leak check: %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var created struct {
+		RoomID    string `json:"roomId"`
+		AdminKey  string `json:"adminKey"`
+		ClientKey string `json:"clientKey"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode created room response: %v", err)
+	}
+
+	// Call GET /api/rooms
+	listReq := httptest.NewRequest(http.MethodGet, "/api/rooms", nil)
+	listRec := httptest.NewRecorder()
+	handleRoomsList(listRec, listReq)
+
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 from /api/rooms, got %d", listRec.Code)
+	}
+
+	bodyBytes := listRec.Body.Bytes()
+	bodyStr := string(bodyBytes)
+
+	if strings.Contains(bodyStr, "adminKey") {
+		t.Errorf("GET /api/rooms response leaked 'adminKey' key: %s", bodyStr)
+	}
+	if strings.Contains(bodyStr, "clientKey") {
+		t.Errorf("GET /api/rooms response leaked 'clientKey' key: %s", bodyStr)
+	}
+	if created.AdminKey != "" && strings.Contains(bodyStr, created.AdminKey) {
+		t.Errorf("GET /api/rooms response leaked actual adminKey value %q", created.AdminKey)
+	}
+	if created.ClientKey != "" && strings.Contains(bodyStr, created.ClientKey) {
+		t.Errorf("GET /api/rooms response leaked actual clientKey value %q", created.ClientKey)
 	}
 }
