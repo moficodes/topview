@@ -373,6 +373,20 @@ func TestWebSocket_AdminAuth(t *testing.T) {
 		hub.mu.Unlock()
 	})
 
+	t.Run("NonExistentRoom", func(t *testing.T) {
+		url := fmt.Sprintf("%s/ws?roomId=non-existent-room-admin&role=admin&key=adm_123", wsBaseURL)
+		conn, resp, err := websocket.DefaultDialer.Dial(url, nil)
+		if conn != nil {
+			conn.Close()
+		}
+		if err == nil {
+			t.Fatal("expected error connecting to non-existent room, got nil")
+		}
+		if resp == nil || resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected status 404 Not Found, got %v", resp)
+		}
+	})
+
 	t.Run("NoKey", func(t *testing.T) {
 		url := fmt.Sprintf("%s/ws?roomId=%s&role=admin", wsBaseURL, roomID)
 		conn, resp, err := websocket.DefaultDialer.Dial(url, nil)

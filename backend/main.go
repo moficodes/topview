@@ -171,19 +171,6 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-func (h *Hub) getOrCreateRoom(roomID string) *Room {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	room, exists := h.rooms[roomID]
-	if !exists {
-		room = newRoom(roomID)
-		h.rooms[roomID] = room
-		log.Printf("Created new room: %s", roomID)
-	}
-	return room
-}
-
 func (h *Hub) removeConnection(roomID string, sc *SafeConn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -274,22 +261,19 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	hub.mu.Lock()
 	room, exists := hub.rooms[roomID]
+	if !exists {
+		hub.mu.Unlock()
+		http.Error(w, "Room not found", http.StatusNotFound)
+		return
+	}
+
 	if role == "admin" {
-		if !exists {
-			room = newRoom(roomID)
-			hub.rooms[roomID] = room
-		}
 		if key == "" || subtle.ConstantTimeCompare([]byte(key), []byte(room.AdminKey)) != 1 {
 			hub.mu.Unlock()
 			http.Error(w, "Invalid admin key", http.StatusUnauthorized)
 			return
 		}
 	} else {
-		if !exists {
-			hub.mu.Unlock()
-			http.Error(w, "Room not found", http.StatusNotFound)
-			return
-		}
 		if key == "" || subtle.ConstantTimeCompare([]byte(key), []byte(room.ClientKey)) != 1 {
 			hub.mu.Unlock()
 			http.Error(w, "Invalid client key", http.StatusUnauthorized)
@@ -322,7 +306,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Register client and queue initial state atomically
 	hub.mu.Lock()
-	hub.rooms[roomID] = room
+	currentRoom, exists := hub.rooms[roomID]
+	if !exists || currentRoom != room {
+		hub.mu.Unlock()
+		return
+	}
 	room.mu.Lock()
 	room.Clients[safeConn] = role
 	clientCount := len(room.Clients)
