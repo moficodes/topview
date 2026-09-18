@@ -52,8 +52,15 @@ export const Admin: React.FC = () => {
 
   const [clientKey, setClientKey] = useState("");
   const [pinCopied, setPinCopied] = useState(false);
-  const [authError, setAuthError] = useState("");
+  const [authError, setAuthError] = useState(() =>
+    !adminKey ? "Admin key is missing. Please enter the admin key to manage this room." : ""
+  );
   const [keyInput, setKeyInput] = useState("");
+  const hasEverConnectedRef = useRef(false);
+
+  useEffect(() => {
+    hasEverConnectedRef.current = false;
+  }, [adminKey]);
 
   const [imgUrl, setImgUrl] = useState("");
   const [x, setX] = useState(0);
@@ -224,7 +231,6 @@ export const Admin: React.FC = () => {
     }
 
     let isUnmounted = false;
-    let hasOpened = false;
 
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
@@ -244,7 +250,7 @@ export const Admin: React.FC = () => {
         ws.close();
         return;
       }
-      hasOpened = true;
+      hasEverConnectedRef.current = true;
       setAuthError("");
       setWsConnected(true);
       reconnectAttemptsRef.current = 0;
@@ -293,15 +299,15 @@ export const Admin: React.FC = () => {
     ws.onclose = () => {
       setWsConnected(false);
       if (isUnmounted) return;
-      if (!hasOpened) {
-        setAuthError("Unauthorized: Invalid admin key or failed to connect to room.");
+      if (!hasEverConnectedRef.current) {
+        setAuthError("Unauthorized: Invalid admin key or room not found.");
         return;
       }
       const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000);
       reconnectAttemptsRef.current += 1;
       log(`WebSocket disconnected, scheduling reconnect in ${delay}ms...`);
       if (reconnectAttemptsRef.current > 5) {
-        setAuthError("Connection lost. Unable to reconnect to room.");
+        setAuthError("Connection lost. Reconnecting to room...");
       }
       reconnectTimerRef.current = setTimeout(() => {
         if (!isUnmounted) {
@@ -401,10 +407,15 @@ export const Admin: React.FC = () => {
     const clientUrl = `${window.location.protocol}//${window.location.host}/room/${roomId}${
       clientKey ? `?key=${clientKey}` : ""
     }`;
-    navigator.clipboard.writeText(clientUrl).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+    navigator.clipboard
+      .writeText(clientUrl)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch((err) => {
+        console.error("Failed to copy URL:", err);
+      });
   };
 
   const handleAuthSubmit = (e: React.FormEvent) => {
@@ -469,9 +480,15 @@ export const Admin: React.FC = () => {
             <button
               type="button"
               onClick={() => {
-                navigator.clipboard.writeText(clientKey);
-                setPinCopied(true);
-                setTimeout(() => setPinCopied(false), 2000);
+                navigator.clipboard
+                  .writeText(clientKey)
+                  .then(() => {
+                    setPinCopied(true);
+                    setTimeout(() => setPinCopied(false), 2000);
+                  })
+                  .catch((err) => {
+                    console.error("Failed to copy PIN:", err);
+                  });
               }}
               className="flex items-center gap-1 px-2.5 py-1 bg-gray-900/90 border border-gray-800 hover:border-purple-500/50 rounded-lg text-xs font-mono text-purple-300 transition-all cursor-pointer"
               title="Click to copy participant passcode"

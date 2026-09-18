@@ -12,6 +12,7 @@ interface RoomInfo {
 export const Home: React.FC = () => {
   const [roomId, setRoomId] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeRooms, setActiveRooms] = useState<RoomInfo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
@@ -56,12 +57,12 @@ export const Home: React.FC = () => {
 
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!roomId.trim()) return;
+    if (!roomId.trim() || isSubmitting) return;
     const cleanId = roomId.trim().toLowerCase().replace(/[^a-z0-9-_]/g, "");
     if (!cleanId) return;
 
     setErrorMsg("");
-    setIsLoading(true);
+    setIsSubmitting(true);
     try {
       const res = await fetch("/api/rooms/create", {
         method: "POST",
@@ -81,12 +82,15 @@ export const Home: React.FC = () => {
       console.error("Room creation error:", err);
       setErrorMsg("Network error connecting to server.");
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
   const handleJoinRoom = (id: string) => {
-    navigate(`/room/${id}`);
+    const cleanId = id.trim().toLowerCase().replace(/[^a-z0-9-_]/g, "");
+    if (cleanId) {
+      navigate(`/room/${cleanId}`);
+    }
   };
 
   const generateRandomRoomId = () => {
@@ -186,15 +190,16 @@ export const Home: React.FC = () => {
             <div className="grid grid-cols-2 gap-3 pt-2">
               <button
                 type="submit"
-                className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-xl text-xs md:text-sm shadow-lg shadow-purple-600/20 transition-all"
+                disabled={isSubmitting || !roomId.trim()}
+                className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-semibold rounded-xl text-xs md:text-sm shadow-lg shadow-purple-600/20 transition-all cursor-pointer disabled:cursor-not-allowed"
               >
-                <ShieldAlert className="w-4 h-4" /> Admin Controls
+                <ShieldAlert className="w-4 h-4" /> {isSubmitting ? "Connecting..." : "Admin Controls"}
               </button>
               <button
                 type="button"
-                onClick={() => roomId.trim() && handleJoinRoom(roomId.trim().toLowerCase())}
-                disabled={!roomId.trim()}
-                className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-gray-900 hover:bg-gray-800 disabled:opacity-40 disabled:hover:bg-gray-900 text-gray-200 font-semibold border border-gray-800 rounded-xl text-xs md:text-sm transition-all"
+                onClick={() => roomId.trim() && handleJoinRoom(roomId)}
+                disabled={isSubmitting || !roomId.trim()}
+                className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-gray-900 hover:bg-gray-800 disabled:opacity-40 disabled:hover:bg-gray-900 text-gray-200 font-semibold border border-gray-800 rounded-xl text-xs md:text-sm transition-all cursor-pointer disabled:cursor-not-allowed"
               >
                 <Monitor className="w-4 h-4" /> Join Viewer
               </button>
