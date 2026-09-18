@@ -119,6 +119,7 @@ export const RoomClient: React.FC = () => {
         return;
       }
       hasEverConnectedRef.current = true;
+      setWsConnected(true);
       setNeedsPasscode(false);
       setAuthError("");
       setErrorMsg("");
@@ -317,7 +318,7 @@ export const RoomClient: React.FC = () => {
                 type="text"
                 inputMode="numeric"
                 pattern="[0-9]*"
-                maxLength={10}
+                maxLength={6}
                 autoFocus
                 value={passcodeInput}
                 onChange={(e) => setPasscodeInput(e.target.value)}
