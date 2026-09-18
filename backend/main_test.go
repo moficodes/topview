@@ -563,6 +563,9 @@ func TestConcurrentBroadcast(t *testing.T) {
 	wsBaseURL := "ws" + strings.TrimPrefix(server.URL, "http")
 	roomID := fmt.Sprintf("test-room-bcast-%d", time.Now().UnixNano())
 
+	// Baseline goroutine count before dialing connections
+	baselineGoroutines := runtime.NumGoroutine()
+
 	// Connect Admin
 	adminURL := fmt.Sprintf("%s/ws?roomId=%s&role=admin", wsBaseURL, roomID)
 	adminConn, _, err := websocket.DefaultDialer.Dial(adminURL, nil)
@@ -595,9 +598,6 @@ func TestConcurrentBroadcast(t *testing.T) {
 		}
 		clients[i] = conn
 	}
-
-	// Measure goroutines while connections are active
-	baselineGoroutines := runtime.NumGoroutine()
 
 	var wg sync.WaitGroup
 	receivedCounts := make([]int, numClients)

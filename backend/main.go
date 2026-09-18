@@ -73,7 +73,7 @@ func (sc *SafeConn) writePump() {
 		case message, ok := <-sc.send:
 			if !ok {
 				// The hub closed the channel
-				_ = sc.WriteMessage(websocket.CloseMessage, []byte{})
+				_ = sc.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 				return
 			}
 			if err := sc.WriteMessage(websocket.TextMessage, message); err != nil {
@@ -247,10 +247,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	room := hub.getOrCreateRoom(roomID)
 
-	room.mu.Lock()
-	currentState := room.State
-	room.mu.Unlock()
-
 	// Configure WebSocket Heartbeat limits on raw conn (Cloud Run Compliance)
 	conn.SetReadLimit(10 << 20) // 10MB limit
 	conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -259,23 +255,21 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
-	// Send initial state to the newly connected client
-	initMsg := WSMessage{
-		Type:    "init",
-		Payload: currentState,
-	}
-	initBytes, err := json.Marshal(initMsg)
-	if err == nil {
-		safeConn.send <- initBytes
-	}
-
-	// Start write pump goroutine for this specific connection
-	go safeConn.writePump()
-
+	// Register client and queue initial state under room.mu atomically
 	room.mu.Lock()
 	room.Clients[safeConn] = role
 	clientCount := len(room.Clients)
+	initMsg := WSMessage{
+		Type:    "init",
+		Payload: room.State,
+	}
+	if initBytes, err := json.Marshal(initMsg); err == nil {
+		safeConn.send <- initBytes
+	}
 	room.mu.Unlock()
+
+	// Start write pump goroutine for this specific connection
+	go safeConn.writePump()
 
 	defer hub.removeConnection(roomID, safeConn)
 
