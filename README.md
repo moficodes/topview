@@ -172,7 +172,7 @@ Set your Google Cloud project ID, region, Artifact Registry repository name, and
 export PROJECT_ID="your-google-cloud-project-id"
 export REGION="us-central1"
 export AR_REPO="tabletop"
-export IMAGE_TAG="v1.3.2"
+export IMAGE_TAG="v1.4.0"
 ```
 
 #### 2. Enable Required APIs & Create Docker Repository
